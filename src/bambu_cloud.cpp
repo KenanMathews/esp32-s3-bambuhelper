@@ -1,5 +1,4 @@
 #include "bambu_cloud.h"
-#include "settings.h"
 #include "config.h"
 
 #include <WiFiClientSecure.h>

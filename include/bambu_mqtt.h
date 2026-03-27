@@ -6,11 +6,11 @@
 
 // Connection diagnostics exposed for display/web
 struct MqttDiag {
-  int      lastRc;          // PubSubClient state code from last attempt
-  uint32_t attempts;        // total reconnect attempts since boot
-  uint32_t messagesRx;      // total MQTT messages received
-  uint32_t freeHeap;        // heap at last attempt
-  bool     tcpOk;           // last TCP reachability result
+  int      lastRc;             // PubSubClient state code from last attempt
+  uint32_t attempts;           // total reconnect attempts since boot
+  uint32_t messagesRx;         // total MQTT messages received
+  uint32_t freeHeap;           // heap at last attempt
+  bool     tcpOk;              // last TCP reachability result
   unsigned long lastAttemptMs; // millis() of last attempt
   unsigned long connectDurMs;  // how long last connect() took
 };
@@ -22,8 +22,8 @@ void handleBambuMqtt();
 void disconnectBambuMqtt();              // disconnect all connections
 void disconnectBambuMqtt(uint8_t slot);  // disconnect specific slot
 
-bool isPrinterConfigured(uint8_t slot);
-bool isAnyPrinterConfigured();
+bool    isPrinterConfigured(uint8_t slot);
+bool    isAnyPrinterConfigured();
 uint8_t getActiveConnCount();            // how many connections are live
 const MqttDiag& getMqttDiag(uint8_t slot = 0);
 

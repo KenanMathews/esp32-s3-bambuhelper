@@ -456,7 +456,7 @@ static void drawWifiSignalIndicator(const BambuState& s) {
   tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
   char wifiBuf[16];
   snprintf(wifiBuf, sizeof(wifiBuf), "%ddBm", s.wifiSignal);
-  tft.drawString(wifiBuf, 4, 232);
+  tft.drawString(wifiBuf, 66, 226);
 }
 
 // ---------------------------------------------------------------------------
@@ -492,9 +492,9 @@ static void drawPrinting() {
   const int16_t row1Y = 60;    // row 1 center Y (progress, nozzle, bed)
   const int16_t row2Y = 148;   // row 2 center Y (part fan, aux fan, chamb fan)
 
-  // === H2-style LED progress bar (y=0-5) ===
+  // === H2-style LED progress bar (y=28-33, below header) ===
   if (progChanged) {
-    drawLedProgressBar(tft, 0, s.progress);
+    drawLedProgressBar(tft, 28, s.progress);
   }
 
   // === Header bar (y=7-25) ===
@@ -655,23 +655,24 @@ static void drawPrinting() {
     tft.setTextFont(2);
 
     // Left: filament indicator (if AMS active) or WiFi signal
+    // x=70 is safe at y=226 (circle chord visible from ~x=64 to x=176)
     if (s.ams.present && s.ams.activeTray < AMS_MAX_TRAYS) {
       AmsTray& t = s.ams.trays[s.ams.activeTray];
       if (t.present) {
-        tft.drawCircle(10, 232, 5, CLR_TEXT_DARK);
-        tft.fillCircle(10, 232, 4, t.colorRgb565);
+        tft.drawCircle(70, 226, 5, CLR_TEXT_DARK);
+        tft.fillCircle(70, 226, 4, t.colorRgb565);
         tft.setTextDatum(ML_DATUM);
         tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
-        tft.drawString(t.type, 19, 232);
+        tft.drawString(t.type, 79, 226);
       } else {
         drawWifiSignalIndicator(s);
       }
     } else if (s.ams.vtPresent && s.ams.activeTray == 254) {
-      tft.drawCircle(10, 232, 5, CLR_TEXT_DARK);
-      tft.fillCircle(10, 232, 4, s.ams.vtColorRgb565);
+      tft.drawCircle(70, 226, 5, CLR_TEXT_DARK);
+      tft.fillCircle(70, 226, 4, s.ams.vtColorRgb565);
       tft.setTextDatum(ML_DATUM);
       tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
-      tft.drawString(s.ams.vtType, 19, 232);
+      tft.drawString(s.ams.vtType, 79, 226);
     } else {
       drawWifiSignalIndicator(s);
     }
@@ -681,12 +682,12 @@ static void drawPrinting() {
     tft.setTextColor(CLR_TEXT_DIM, CLR_BG);
     char layerBuf[20];
     snprintf(layerBuf, sizeof(layerBuf), "L%d/%d", s.layerNum, s.totalLayers);
-    tft.drawString(layerBuf, SCREEN_W / 2, 232);
+    tft.drawString(layerBuf, SCREEN_W / 2, 226);
 
-    // Speed mode (right)
+    // Speed mode (right) — x=174 is safe at y=226
     tft.setTextDatum(MR_DATUM);
     tft.setTextColor(speedLevelColor(s.speedLevel), CLR_BG);
-    tft.drawString(speedLevelName(s.speedLevel), SCREEN_W - 4, 232);
+    tft.drawString(speedLevelName(s.speedLevel), 174, 226);
   }
 }
 
@@ -709,9 +710,9 @@ static void drawFinished() {
   const int16_t gaugeRight = 168;
   const int16_t gaugeY = 80;
 
-  // === H2-style LED progress bar at 100% (y=0-5) ===
+  // === H2-style LED progress bar at 100% (y=28-33, below header) ===
   if (forceRedraw) {
-    drawLedProgressBar(tft, 0, 100);
+    drawLedProgressBar(tft, 28, 100);
   }
 
   // === Header bar (y=7-25) — same as printing screen ===
@@ -796,7 +797,7 @@ void updateDisplay() {
   // Shimmer runs at its own cadence (~40fps), independent of display refresh
   if (currentScreen == SCREEN_PRINTING) {
     BambuState& sh = displayedPrinter().state;
-    tickProgressShimmer(tft, 0, sh.progress, sh.printing);
+    tickProgressShimmer(tft, 28, sh.progress, sh.printing);
   }
   // Pong clock runs at ~50fps, independent of display refresh
   if (currentScreen == SCREEN_CLOCK && dispSettings.pongClock) {
@@ -870,6 +871,11 @@ void updateDisplay() {
         tft.fillScreen(TFT_BLACK);
         setBacklight(0);
       }
+      break;
+
+    case SCREEN_LAUNCHER:
+      // Launcher is rendered and updated entirely in main.cpp via launcherUpdate().
+      // updateDisplay() is not called while SCREEN_LAUNCHER is active.
       break;
   }
 

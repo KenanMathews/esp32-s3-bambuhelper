@@ -1,77 +1,70 @@
 #include <Arduino.h>
 #include "display_ui.h"
+#include "display_launcher.h"
+#include "lvgl_port.h"
 #include "settings.h"
 #include "wifi_manager.h"
 #include "web_server.h"
-#include "bambu_mqtt.h"
 #include "config.h"
 #include "bambu_state.h"
 #include "button.h"
 #include "buzzer.h"
-
-static unsigned long splashEnd = 0;
-static unsigned long finishScreenStart = 0;
-static unsigned long idleClockStart = 0;  // when all printers became idle
-static char prevGcodeState[MAX_ACTIVE_PRINTERS][16] = {{0}};
+#include <BambuClient.h>
 
 // ---------------------------------------------------------------------------
-//  Display rotation logic (multi-printer)
+//  App state
+// ---------------------------------------------------------------------------
+static unsigned long splashEnd         = 0;
+static unsigned long finishScreenStart = 0;
+static unsigned long idleClockStart    = 0;
+static ScreenState   prelaunchScreen   = SCREEN_IDLE;  // screen to restore on launcher dismiss
+static char          prevGcodeState[MAX_ACTIVE_PRINTERS][16] = {{0}};
+
+// ---------------------------------------------------------------------------
+//  Multi-printer display rotation
 // ---------------------------------------------------------------------------
 static void handleRotation() {
   if (rotState.mode == ROTATE_OFF) return;
-  if (getActiveConnCount() < 2) return;
+  if (bambuClient.activeCount() < 2) return;
 
-  // Don't rotate when display is in clock or off state,
-  // UNLESS a printer is actively printing (wake up to show it)
   ScreenState scr = getScreenState();
   if (scr == SCREEN_CLOCK || scr == SCREEN_OFF) {
     bool anyPrinting = false;
     for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
-      if (isPrinterConfigured(i) && printers[i].state.connected && printers[i].state.printing) {
-        anyPrinting = true;
-        break;
+      if (bambuClient.isConfigured(i) && bambuClient.getState(i).printing) {
+        anyPrinting = true; break;
       }
     }
     if (!anyPrinting) return;
-    // A printer started printing — wake display and let rotation proceed
     setBacklight(brightness);
   }
 
   unsigned long now = millis();
   if (now - rotState.lastRotateMs < rotState.intervalMs) return;
 
-  // Gather candidates
   uint8_t candidates[MAX_ACTIVE_PRINTERS];
   uint8_t candidateCount = 0;
-  uint8_t printingCount = 0;
-  uint8_t printingSlot = 0xFF;
+  uint8_t printingCount  = 0;
+  uint8_t printingSlot   = 0xFF;
 
   for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
-    if (!isPrinterConfigured(i)) continue;
-    if (!printers[i].state.connected) continue;
+    if (!bambuClient.isConfigured(i)) continue;
+    if (!bambuClient.getState(i).connected) continue;
     candidates[candidateCount++] = i;
-    if (printers[i].state.printing) {
-      printingCount++;
-      printingSlot = i;
-    }
+    if (bambuClient.getState(i).printing) { printingCount++; printingSlot = i; }
   }
 
   if (candidateCount == 0) return;
 
-  if (rotState.mode == ROTATE_SMART) {
-    if (printingCount == 1) {
-      // Only one printing — show it, no cycling
-      if (rotState.displayIndex != printingSlot) {
-        rotState.displayIndex = printingSlot;
-        triggerDisplayTransition();
-      }
-      rotState.lastRotateMs = now;
-      return;
+  if (rotState.mode == ROTATE_SMART && printingCount == 1) {
+    if (rotState.displayIndex != printingSlot) {
+      rotState.displayIndex = printingSlot;
+      triggerDisplayTransition();
     }
-    // 0 or 2 printing: fall through to cycling
+    rotState.lastRotateMs = now;
+    return;
   }
 
-  // Cycle to next candidate
   uint8_t current = rotState.displayIndex;
   for (uint8_t attempt = 1; attempt <= MAX_ACTIVE_PRINTERS; attempt++) {
     uint8_t next = (current + attempt) % MAX_ACTIVE_PRINTERS;
@@ -84,10 +77,53 @@ static void handleRotation() {
       }
     }
   }
-
   rotState.lastRotateMs = now;
 }
 
+// ---------------------------------------------------------------------------
+//  Launcher: handle selection and dismiss
+// ---------------------------------------------------------------------------
+static void handleLauncherSelection(int8_t sel) {
+  switch (sel) {
+    case LAUNCHER_DASHBOARD:
+      setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+      break;
+
+    case LAUNCHER_CLOCK:
+      setScreenState(SCREEN_CLOCK);
+      break;
+
+    case LAUNCHER_SETTINGS:
+      // Show current screen underneath (web UI accessible via WiFi)
+      setScreenState(SCREEN_IDLE);
+      break;
+
+    case LAUNCHER_PRINTER:
+      // Cycle to the next configured printer
+      if (bambuClient.activeCount() >= 2) {
+        uint8_t idx = rotState.displayIndex;
+        for (uint8_t a = 1; a <= MAX_ACTIVE_PRINTERS; a++) {
+          uint8_t next = (idx + a) % MAX_ACTIVE_PRINTERS;
+          if (bambuClient.isConfigured(next) && next != idx) {
+            rotState.displayIndex = next;
+            triggerDisplayTransition();
+            rotState.lastRotateMs = millis();
+            break;
+          }
+        }
+      }
+      setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+      break;
+
+    default:
+      // Dismiss (-2 timeout or long-press again)
+      setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  setup
 // ---------------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
@@ -95,135 +131,158 @@ void setup() {
 
   loadSettings();
   initDisplay();
+  lvglPortInit();
   splashEnd = millis() + 2000;
   setBacklight(brightness);
 }
 
+// ---------------------------------------------------------------------------
+//  loop
+// ---------------------------------------------------------------------------
 void loop() {
-  // Hold splash for 2s
+  // ── Splash hold (2 s) — then start all subsystems ────────────────────────
   if (splashEnd > 0 && millis() > splashEnd) {
     splashEnd = 0;
     initWiFi();
     initWebServer();
-    initBambuMqtt();
+    bambuClient.begin();
     initButton();
     initBuzzer();
   }
+  if (splashEnd > 0) { delay(10); return; }
 
-  if (splashEnd > 0) {
-    delay(10);
-    return;
-  }
-
+  // ── Always-running handlers ───────────────────────────────────────────────
   handleWiFi();
   handleWebServer();
 
-  if (isWiFiConnected() && !isAPMode()) {
-    if (isAnyPrinterConfigured()) {
-      handleBambuMqtt();
-      handleRotation();
+  // ── Launcher active — handle entirely here, skip rest of state machine ───
+  if (getScreenState() == SCREEN_LAUNCHER) {
+    int8_t sel = launcherUpdate();
+    if (sel != -1) {          // selection made or auto-dismissed
+      handleLauncherSelection(sel);
+      applyDisplaySettings();  // force full TFT_eSPI redraw over LVGL content
     }
+    // Still pump MQTT and buzzer while launcher is open
+    if (isWiFiConnected() && !isAPMode() && bambuClient.isAnyConfigured()) {
+      bambuClient.loop();
+    }
+    buzzerTick();
+    return;                   // do NOT call updateDisplay() for launcher
+  }
 
-    // Handle physical button press
-    if (wasButtonPressed()) {
-      ScreenState cur = getScreenState();
-      if (cur == SCREEN_OFF || cur == SCREEN_CLOCK) {
-        // Wake from sleep + reset backoff for immediate reconnect
-        setBacklight(brightness);
-        finishScreenStart = 0;
-        idleClockStart = 0;
-        resetMqttBackoff();
-        setScreenState(SCREEN_IDLE);  // state machine will correct on next loop
-      } else if (getActiveConnCount() >= 2) {
-        // Cycle to next configured printer
-        uint8_t idx = rotState.displayIndex;
-        for (uint8_t a = 1; a <= MAX_ACTIVE_PRINTERS; a++) {
-          uint8_t next = (idx + a) % MAX_ACTIVE_PRINTERS;
-          if (isPrinterConfigured(next) && next != idx) {
-            rotState.displayIndex = next;
-            triggerDisplayTransition();
-            rotState.lastRotateMs = millis();  // reset auto-rotate timer
-            finishScreenStart = 0;
-            break;
-          }
+  // ── Button: long press → launcher (works regardless of WiFi state) ──────
+  if (wasButtonLongPressed()) {
+    prelaunchScreen = getScreenState();
+    setScreenState(SCREEN_LAUNCHER);
+    launcherEnter();
+    buzzerTick();
+    return;
+  }
+
+  // ── Button: short press ─────────────────────────────────────────────────
+  if (wasButtonPressed()) {
+    ScreenState cur = getScreenState();
+    if (cur == SCREEN_OFF || cur == SCREEN_CLOCK) {
+      setBacklight(brightness);
+      finishScreenStart = 0;
+      idleClockStart    = 0;
+      if (isWiFiConnected() && !isAPMode()) bambuClient.resetBackoff();
+      setScreenState(SCREEN_IDLE);
+    } else if (isWiFiConnected() && !isAPMode() && bambuClient.activeCount() >= 2) {
+      uint8_t idx = rotState.displayIndex;
+      for (uint8_t a = 1; a <= MAX_ACTIVE_PRINTERS; a++) {
+        uint8_t next = (idx + a) % MAX_ACTIVE_PRINTERS;
+        if (bambuClient.isConfigured(next) && next != idx) {
+          rotState.displayIndex = next;
+          triggerDisplayTransition();
+          rotState.lastRotateMs = millis();
+          finishScreenStart     = 0;
+          break;
         }
       }
     }
+  }
 
-    // Auto-select screen based on displayed printer state
-    BambuState& s = displayedPrinter().state;
+  // ── WiFi / MQTT ───────────────────────────────────────────────────────────
+  if (isWiFiConnected() && !isAPMode()) {
+    if (bambuClient.isAnyConfigured()) {
+      bambuClient.loop();
+      handleRotation();
+    }
+
+    // ── Auto screen selection ───────────────────────────────────────────
+    const BambuState& s = displayedPrinter().state;
     ScreenState current = getScreenState();
 
-    if (!isAnyPrinterConfigured()) {
-      if (current != SCREEN_IDLE && current != SCREEN_OFF) {
-        setScreenState(SCREEN_IDLE);
-        finishScreenStart = 0;
-      }
+    if (!bambuClient.isAnyConfigured()) {
+      // No printer configured — stay on IDLE (web UI shows setup prompt)
+      if (current != SCREEN_IDLE) { setScreenState(SCREEN_IDLE); finishScreenStart = 0; }
+
     } else if (!s.connected && current != SCREEN_CONNECTING_MQTT &&
                current != SCREEN_OFF && current != SCREEN_CLOCK) {
       setScreenState(SCREEN_CONNECTING_MQTT);
       finishScreenStart = 0;
+
     } else if (!s.connected && (current == SCREEN_OFF || current == SCREEN_CLOCK)) {
-      // Stay off/clock when printer is disconnected/off
+      // Stay off/clock — printer is unreachable
+
     } else if (s.connected && s.printing) {
       if (current != SCREEN_PRINTING) {
         setScreenState(SCREEN_PRINTING);
         finishScreenStart = 0;
       }
-      s.finishBuzzerPlayed = false;  // reset for next finish event
+      displayedPrinter().state.finishBuzzerPlayed = false;
+
     } else if (s.connected && !s.printing &&
                strcmp(s.gcodeState, "FINISH") == 0) {
       if (current != SCREEN_FINISHED && current != SCREEN_OFF && current != SCREEN_CLOCK) {
         setScreenState(SCREEN_FINISHED);
         finishScreenStart = millis();
-        if (!s.finishBuzzerPlayed) {
+        BambuState& ms = displayedPrinter().state;
+        if (!ms.finishBuzzerPlayed) {
           buzzerPlay(BUZZ_PRINT_FINISHED);
-          s.finishBuzzerPlayed = true;
+          ms.finishBuzzerPlayed = true;
         }
       }
-      // Only turn off/clock after timeout if NO printer is still printing
+      // Transition off/clock after finish-display timeout
       if (current == SCREEN_FINISHED && !dpSettings.keepDisplayOn &&
           dpSettings.finishDisplayMins > 0 && finishScreenStart > 0 &&
           millis() - finishScreenStart > (unsigned long)dpSettings.finishDisplayMins * 60000UL) {
         bool anyPrinting = false;
         for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
-          if (isPrinterConfigured(i) && printers[i].state.connected && printers[i].state.printing) {
-            anyPrinting = true;
-            break;
+          if (bambuClient.isConfigured(i) && bambuClient.getState(i).printing) {
+            anyPrinting = true; break;
           }
         }
         if (!anyPrinting) {
-          // Never go to SCREEN_OFF without a physical button — no way to wake up
-          if (dpSettings.showClockAfterFinish || buttonType == BTN_DISABLED) {
+          if (dpSettings.showClockAfterFinish) {
             setScreenState(SCREEN_CLOCK);
           } else {
             setScreenState(SCREEN_OFF);
           }
         }
       }
+
     } else if (s.connected && !s.printing &&
                strcmp(s.gcodeState, "FINISH") != 0) {
-      // Stay in CLOCK/OFF — only button press or print start exits these
       if (current == SCREEN_CLOCK || current == SCREEN_OFF) {
-        // nothing — let clock/off persist while printer is idle
+        // Stay — idle/clock persists until button press
       } else if (current != SCREEN_IDLE) {
         setScreenState(SCREEN_IDLE);
         finishScreenStart = 0;
-        idleClockStart = 0;
+        idleClockStart    = 0;
       }
     }
   }
 
-  // Idle → Clock: if all printers are idle and showClockAfterFinish is on,
-  // transition to clock after finishDisplayMins (same timeout as FINISH→clock).
+  // ── Idle → Clock auto-transition ─────────────────────────────────────────
   ScreenState cur = getScreenState();
   if (cur == SCREEN_IDLE && dpSettings.showClockAfterFinish &&
       !dpSettings.keepDisplayOn && dpSettings.finishDisplayMins > 0) {
     bool anyBusy = false;
     for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
-      if (isPrinterConfigured(i) && printers[i].state.connected && printers[i].state.printing) {
-        anyBusy = true;
-        break;
+      if (bambuClient.isConfigured(i) && bambuClient.getState(i).printing) {
+        anyBusy = true; break;
       }
     }
     if (!anyBusy) {
@@ -238,10 +297,10 @@ void loop() {
     idleClockStart = 0;
   }
 
-  // Check for error state transition on any printer
+  // ── Error buzzer ──────────────────────────────────────────────────────────
   for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
-    if (!isPrinterConfigured(i)) continue;
-    BambuState& ps = printers[i].state;
+    if (!bambuClient.isConfigured(i)) continue;
+    const BambuState& ps = bambuClient.getState(i);
     if (strcmp(ps.gcodeState, "FAILED") == 0 &&
         strcmp(prevGcodeState[i], "FAILED") != 0 &&
         prevGcodeState[i][0] != '\0') {

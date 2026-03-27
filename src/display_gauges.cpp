@@ -9,7 +9,7 @@ void drawLedProgressBar(TFT_eSPI& tft, int16_t y, uint8_t progress) {
   uint16_t bg = dispSettings.bgColor;
   uint16_t track = dispSettings.trackColor;
 
-  const int16_t barW = 236;
+  const int16_t barW = 150;
   const int16_t barH = 5;
   const int16_t barX = (SCREEN_W - barW) / 2;
 
@@ -64,7 +64,7 @@ void tickProgressShimmer(TFT_eSPI& tft, int16_t y, uint8_t progress, bool printi
   if (now - shimmerLastMs < SHIMMER_INTERVAL) return;
   shimmerLastMs = now;
 
-  const int16_t barW = 236;
+  const int16_t barW = 150;
   const int16_t barH = 5;
   const int16_t barX = (SCREEN_W - barW) / 2;
   int16_t fillW = (progress * barW) / 100;

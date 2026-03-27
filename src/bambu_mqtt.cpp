@@ -1,9 +1,8 @@
 #include "bambu_mqtt.h"
 #include "bambu_state.h"
-#include "settings.h"
-#include "display_ui.h"
-#include "config.h"
 #include "bambu_cloud.h"
+#include "settings.h"
+#include "config.h"
 
 #include <ArduinoJson.h>
 #include <PubSubClient.h>

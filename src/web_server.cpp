@@ -368,20 +368,6 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
       <p style="font-size:11px;color:#8B949E;margin-top:4px">Smart mode shows the printing printer. Rotates only when both are printing.</p>
 
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
-        <label for="btntype">Physical Button</label>
-        <select id="btntype" onchange="toggleBtnPin()">
-          <option value="0" %BTN_OFF%>Disabled</option>
-          <option value="1" %BTN_PUSH%>Push Button (active LOW)</option>
-          <option value="2" %BTN_TOUCH%>TTP223 Touch (active HIGH)</option>
-        </select>
-        <div id="btnPinRow">
-          <label for="btnpin">Button GPIO Pin</label>
-          <input type="number" id="btnpin" min="1" max="48" value="%BTN_PIN%">
-          <p style="font-size:11px;color:#8B949E;margin-top:4px">Button switches between printers. Wakes display from sleep.</p>
-        </div>
-      </div>
-
-      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
         <label for="buzzen">Buzzer (optional)</label>
         <select id="buzzen" onchange="toggleBuzPin()">
           <option value="0" %BUZ_OFF%>Disabled</option>
@@ -614,8 +600,8 @@ function cloudLogout(){
 
 // --- Hardware & Multi-Printer ---
 function toggleBtnPin(){
-  document.getElementById('btnPinRow').style.display=
-    document.getElementById('btntype').value==='0'?'none':'block';
+  var v=document.getElementById('btntype').value;
+  document.getElementById('btnPinRow').style.display=(v==='0'||v==='3')?'none':'block';
 }
 toggleBtnPin();
 
@@ -949,10 +935,6 @@ static String processTemplate(const String& html) {
   page.replace("%ROT_INTERVAL%", String(rotState.intervalMs / 1000));
 
   // Button settings
-  page.replace("%BTN_OFF%", buttonType == BTN_DISABLED ? "selected" : "");
-  page.replace("%BTN_PUSH%", buttonType == BTN_PUSH ? "selected" : "");
-  page.replace("%BTN_TOUCH%", buttonType == BTN_TOUCH ? "selected" : "");
-  page.replace("%BTN_PIN%", String(buttonPin));
 
   // Buzzer settings
   page.replace("%BUZ_OFF%", buzzerSettings.enabled ? "" : "selected");
@@ -1261,18 +1243,6 @@ static void handleSaveRotation() {
   }
   saveRotationSettings();
 
-  // Button settings
-  if (server.hasArg("btntype")) {
-    uint8_t bt = server.arg("btntype").toInt();
-    if (bt <= 2) buttonType = (ButtonType)bt;
-  }
-  if (server.hasArg("btnpin")) {
-    uint8_t bp = server.arg("btnpin").toInt();
-    if (bp > 0 && bp <= 48) buttonPin = bp;
-  }
-  saveButtonSettings();
-  initButton();
-
   // Buzzer settings
   if (server.hasArg("buzzen")) {
     buzzerSettings.enabled = (server.arg("buzzen") == "1");
@@ -1363,11 +1333,6 @@ static void handleSettingsExport() {
   JsonObject rot = doc["rotation"].to<JsonObject>();
   rot["mode"] = (uint8_t)rotState.mode;
   rot["intervalMs"] = rotState.intervalMs;
-
-  // Button
-  JsonObject btn = doc["button"].to<JsonObject>();
-  btn["type"] = (uint8_t)buttonType;
-  btn["pin"] = buttonPin;
 
   // Buzzer
   JsonObject buz = doc["buzzer"].to<JsonObject>();
@@ -1500,13 +1465,6 @@ static void handleSettingsImportFinish() {
     if (rot["intervalMs"].is<uint32_t>()) rotState.intervalMs = rot["intervalMs"].as<uint32_t>();
   }
 
-  // Button
-  JsonObject btn = doc["button"];
-  if (btn) {
-    if (btn["type"].is<uint8_t>()) buttonType = (ButtonType)btn["type"].as<uint8_t>();
-    if (btn["pin"].is<uint8_t>())  buttonPin = btn["pin"].as<uint8_t>();
-  }
-
   // Buzzer
   JsonObject buz = doc["buzzer"];
   if (buz) {
@@ -1519,7 +1477,6 @@ static void handleSettingsImportFinish() {
   // Save everything to NVS
   saveSettings();
   saveRotationSettings();
-  saveButtonSettings();
   saveBuzzerSettings();
 
   server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Settings imported. Restarting...\"}");

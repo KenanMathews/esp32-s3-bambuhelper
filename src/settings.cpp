@@ -14,8 +14,6 @@ DisplaySettings dispSettings;
 NetworkSettings netSettings;
 DisplayPowerSettings dpSettings;
 char cloudEmail[64] = {0};
-ButtonType buttonType = BTN_DISABLED;
-uint8_t buttonPin = BUTTON_DEFAULT_PIN;
 BuzzerSettings buzzerSettings = { false, BUZZER_DEFAULT_PIN, 0, 0 };
 
 static Preferences prefs;
@@ -220,10 +218,6 @@ void loadSettings() {
   rotState.displayIndex = 0;
   rotState.lastRotateMs = 0;
 
-  // Button settings
-  buttonType = (ButtonType)prefs.getUChar("btn_type", BTN_DISABLED);
-  buttonPin = prefs.getUChar("btn_pin", BUTTON_DEFAULT_PIN);
-
   // Buzzer settings
   buzzerSettings.enabled = prefs.getBool("buz_on", false);
   buzzerSettings.pin = prefs.getUChar("buz_pin", BUZZER_DEFAULT_PIN);
@@ -323,13 +317,6 @@ void saveRotationSettings() {
   prefs.begin(NVS_NAMESPACE, false);
   prefs.putUChar("rot_mode", rotState.mode);
   prefs.putULong("rot_intv", rotState.intervalMs);
-  prefs.end();
-}
-
-void saveButtonSettings() {
-  prefs.begin(NVS_NAMESPACE, false);
-  prefs.putUChar("btn_type", buttonType);
-  prefs.putUChar("btn_pin", buttonPin);
   prefs.end();
 }
 

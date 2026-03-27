@@ -1,0 +1,12 @@
+{
+  "name": "bambu_client",
+  "version": "1.0.0",
+  "description": "Bambu Lab printer MQTT client SDK for ESP32",
+  "keywords": ["bambu", "mqtt", "3d-printing", "esp32"],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "flags": ["-I../../include", "-I../../src"]
+  }
+}

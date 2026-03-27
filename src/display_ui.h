@@ -13,7 +13,8 @@ enum ScreenState {
   SCREEN_PRINTING,
   SCREEN_FINISHED,
   SCREEN_CLOCK,
-  SCREEN_OFF
+  SCREEN_OFF,
+  SCREEN_LAUNCHER   // long-press overlay menu
 };
 
 extern TFT_eSPI tft;
