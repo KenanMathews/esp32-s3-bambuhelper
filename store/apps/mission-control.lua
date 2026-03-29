@@ -93,48 +93,14 @@ local function state_color(st)
     return CLR_DIM
 end
 
--- ── Report card overlay (shown in-place on FINISH) ─────────────────────────
-local function show_report()
-    local rscr = ui.screen()
-
-    ui.label(rscr, "Print Complete", {align="top_mid", y=14, font=16, color=CLR_CYAN})
-
-    -- Divider
-    ui.rect(rscr, {cx=120, cy=44, w=180, h=1, color=0x2945})
-
-    -- Job name
-    ui.label(rscr, bambu.job_name(), {align="top_mid", y=52, font=14, color=CLR_TEXT, w=200})
-
-    -- Stats
+-- ── Save report and exit on FINISH ─────────────────────────────────────────
+local function save_and_exit()
     local elapsed = fmt_elapsed()
-    local rows = {
-        {"Elapsed",  elapsed,               CLR_TEXT},
-        {"Layers",   bambu.total_layers() .. " layers", CLR_TEXT},
-        {"Nozzle",   string.format("%.0f°C target", bambu.nozzle_target()), CLR_ORANGE},
-        {"Bed",      string.format("%.0f°C target", bambu.bed_target()),    CLR_BLUE},
-    }
-    local y = 80
-    for _, row in ipairs(rows) do
-        ui.label(rscr, row[1], {x=28, y=y, font=14, color=CLR_DIM})
-        ui.label(rscr, row[2], {x=105, y=y, font=14, color=row[3]})
-        y = y + 22
-    end
-
-    -- Divider
-    ui.rect(rscr, {cx=120, cy=176, w=180, h=1, color=0x2945})
-
-    -- Close hint
-    ui.label(rscr, "Long press to exit", {align="bottom_mid", y=-10, font=14, color=CLR_DIM})
-
-    ui.show(rscr)
-
-    -- Beep
-    sys.beep()
-
-    -- Save report to persistent store
     sys.store_set("last_report_job",     bambu.job_name())
     sys.store_set("last_report_elapsed", elapsed)
     sys.store_set("last_report_layers",  tostring(bambu.total_layers()))
+    sys.beep()
+    sys.exit()
 end
 
 -- ── Tick ───────────────────────────────────────────────────────────────────
@@ -148,11 +114,10 @@ sys.on_tick(function(_dt)
     end
     was_printing = printing
 
-    -- Show report once on FINISH
+    -- Save report and exit on FINISH
     if state == "FINISH" and not report_shown then
         report_shown = true
-        show_report()
-        -- Keep ticking so long-press exit still works
+        save_and_exit()
         return
     end
 
