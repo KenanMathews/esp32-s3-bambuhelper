@@ -21,6 +21,7 @@
 static unsigned long splashEnd         = 0;
 static unsigned long finishScreenStart = 0;
 static unsigned long idleClockStart    = 0;
+static unsigned long connectingStart   = 0;  // for connecting→clock/off timeout
 static ScreenState   prelaunchScreen   = SCREEN_IDLE;  // screen to restore on launcher dismiss
 static char          prevGcodeState[MAX_ACTIVE_PRINTERS][16] = {{0}};
 
@@ -262,6 +263,8 @@ void loop() {
                current != SCREEN_OFF && current != SCREEN_CLOCK) {
       setScreenState(SCREEN_CONNECTING_MQTT);
       finishScreenStart = 0;
+      connectingStart   = millis();
+      idleClockStart    = 0;
 
     } else if (!s.connected && (current == SCREEN_OFF || current == SCREEN_CLOCK)) {
       // Stay off/clock — printer is unreachable
@@ -275,7 +278,11 @@ void loop() {
 
     } else if (s.connected && !s.printing &&
                strcmp(s.gcodeState, "FINISH") == 0) {
-      if (current != SCREEN_FINISHED && current != SCREEN_OFF && current != SCREEN_CLOCK) {
+      // Wake display if it was off — print just finished
+      if (current == SCREEN_OFF) {
+        setBacklight(brightness);
+      }
+      if (current != SCREEN_FINISHED && current != SCREEN_CLOCK) {
         setScreenState(SCREEN_FINISHED);
         finishScreenStart = millis();
         BambuState& ms = displayedPrinter().state;
@@ -284,6 +291,18 @@ void loop() {
           ms.finishBuzzerPlayed = true;
         }
       }
+      // Door ack: if enabled and printer has door sensor, wait for door open before timeout
+      BambuState& ms2 = displayedPrinter().state;
+      if (dpSettings.doorAckEnabled && ms2.doorSensorPresent && !ms2.doorAcknowledged) {
+        if (ms2.doorOpen) {
+          ms2.doorAcknowledged = true;
+          finishScreenStart = millis();  // restart timeout after door opens
+        }
+        // Don't advance the timeout until acknowledged — keep finishScreenStart fresh
+        // so the timer only starts once the door has been opened
+        if (!ms2.doorAcknowledged) finishScreenStart = millis();
+      }
+
       // Transition off/clock after finish-display timeout
       if (current == SCREEN_FINISHED && !dpSettings.keepDisplayOn &&
           dpSettings.finishDisplayMins > 0 && finishScreenStart > 0 &&
@@ -315,10 +334,10 @@ void loop() {
     }
   }
 
-  // ── Idle → Clock auto-transition ─────────────────────────────────────────
+  // ── Idle / Connecting → Clock / Off auto-transition ──────────────────────
   ScreenState cur = getScreenState();
-  if (cur == SCREEN_IDLE && dpSettings.showClockAfterFinish &&
-      !dpSettings.keepDisplayOn && dpSettings.finishDisplayMins > 0) {
+  bool isIdleScreen = (cur == SCREEN_IDLE || cur == SCREEN_CONNECTING_MQTT);
+  if (isIdleScreen && !dpSettings.keepDisplayOn && dpSettings.finishDisplayMins > 0) {
     bool anyBusy = false;
     for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
       if (bambuClient.isConfigured(i) && bambuClient.getState(i).printing) {
@@ -328,12 +347,16 @@ void loop() {
     if (!anyBusy) {
       if (idleClockStart == 0) idleClockStart = millis();
       if (millis() - idleClockStart > (unsigned long)dpSettings.finishDisplayMins * 60000UL) {
-        setScreenState(SCREEN_CLOCK);
+        if (dpSettings.showClockAfterFinish) {
+          setScreenState(SCREEN_CLOCK);
+        } else {
+          setScreenState(SCREEN_OFF);
+        }
       }
     } else {
       idleClockStart = 0;
     }
-  } else if (cur != SCREEN_IDLE) {
+  } else if (!isIdleScreen) {
     idleClockStart = 0;
   }
 
@@ -350,5 +373,6 @@ void loop() {
   }
 
   buzzerTick();
+  checkNightMode();
   updateDisplay();
 }

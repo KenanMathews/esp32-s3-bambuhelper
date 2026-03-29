@@ -28,6 +28,7 @@
 #include "bambu_mqtt.h"
 #include "clock_pong.h"
 #include <lvgl.h>
+#include <time.h>
 
 // TFT_eSPI instance — used only by lvgl_port.cpp disp_flush callback.
 TFT_eSPI tft = TFT_eSPI();
@@ -171,6 +172,43 @@ ScreenState getScreenState() {
 }
 
 // ---------------------------------------------------------------------------
+//  checkNightMode — call once per loop to apply night/screensaver brightness
+// ---------------------------------------------------------------------------
+void checkNightMode() {
+    // SCREEN_OFF is handled by setBacklight(0) in setScreenState — don't override
+    if (currentScreen == SCREEN_OFF) return;
+
+    uint8_t targetBrightness = brightness;
+
+    // Night mode requires NTP sync
+    if (dpSettings.nightModeEnabled) {
+        struct tm now;
+        if (getLocalTime(&now, 0)) {
+            uint8_t h = now.tm_hour;
+            bool isNight = false;
+            if (dpSettings.nightStartHour < dpSettings.nightEndHour) {
+                isNight = (h >= dpSettings.nightStartHour && h < dpSettings.nightEndHour);
+            } else {
+                // Wrap-around: e.g. 22→7
+                isNight = (h >= dpSettings.nightStartHour || h < dpSettings.nightEndHour);
+            }
+            if (isNight) targetBrightness = dpSettings.nightBrightness;
+        }
+    }
+
+    // Screensaver brightness on idle/clock screens (0 = disabled)
+    if (dpSettings.screensaverBrightness > 0 &&
+        (currentScreen == SCREEN_CLOCK || currentScreen == SCREEN_IDLE ||
+         currentScreen == SCREEN_CONNECTING_MQTT)) {
+        // Only dim further (screensaver ≤ night ≤ brightness)
+        if (dpSettings.screensaverBrightness < targetBrightness)
+            targetBrightness = dpSettings.screensaverBrightness;
+    }
+
+    setBacklight(targetBrightness);
+}
+
+// ---------------------------------------------------------------------------
 //  updateDisplay — called every loop() iteration
 //  Throttled to DISPLAY_UPDATE_MS except for pong which has its own cadence.
 // ---------------------------------------------------------------------------
@@ -182,7 +220,10 @@ void updateDisplay() {
     }
 
     unsigned long now = millis();
-    if (now - lastDisplayUpdate < DISPLAY_UPDATE_MS) return;
+    // Adaptive refresh: ~12 FPS while gauges are animating, 4 FPS at idle
+    unsigned long updateInterval = (currentScreen == SCREEN_PRINTING && !printerGaugesSettled())
+                                   ? 83UL : DISPLAY_UPDATE_MS;
+    if (now - lastDisplayUpdate < updateInterval) return;
     lastDisplayUpdate = now;
 
     // Update dynamic content for the current screen

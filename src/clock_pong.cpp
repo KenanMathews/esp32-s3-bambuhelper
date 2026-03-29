@@ -527,8 +527,12 @@ void tickPongClock() {
   {
     const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     char dateStr[20];
-    snprintf(dateStr, sizeof(dateStr), "%s %02d.%02d.%04d",
-             days[now.tm_wday], now.tm_mday, now.tm_mon + 1, now.tm_year + 1900);
+    if (netSettings.use24h)
+      snprintf(dateStr, sizeof(dateStr), "%s %02d.%02d.%04d",
+               days[now.tm_wday], now.tm_mday, now.tm_mon + 1, now.tm_year + 1900);
+    else
+      snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d/%04d",
+               days[now.tm_wday], now.tm_mon + 1, now.tm_mday, now.tm_year + 1900);
     if (strcmp(dateStr, prevDateStr) != 0) {
       tft.setTextFont(2);
       tft.setTextSize(1);

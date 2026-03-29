@@ -36,6 +36,8 @@ static void smoothLerp(float& cur, float target) {
     else cur += diff * SMOOTH_ALPHA;
 }
 
+static bool smoothSettled = true;  // false while any gauge is still interpolating
+
 static void tickSmooth(const BambuState& s, bool snap) {
     if (snap || !smoothInited) {
         smoothNozzleTemp = s.nozzleTemp;
@@ -44,6 +46,7 @@ static void tickSmooth(const BambuState& s, bool snap) {
         smoothAuxFan     = s.auxFanPct;
         smoothChamberFan = s.chamberFanPct;
         smoothInited = true;
+        smoothSettled = true;
         return;
     }
     smoothLerp(smoothNozzleTemp, s.nozzleTemp);
@@ -51,7 +54,14 @@ static void tickSmooth(const BambuState& s, bool snap) {
     smoothLerp(smoothPartFan,    (float)s.coolingFanPct);
     smoothLerp(smoothAuxFan,     (float)s.auxFanPct);
     smoothLerp(smoothChamberFan, (float)s.chamberFanPct);
+    smoothSettled = (smoothNozzleTemp == s.nozzleTemp &&
+                     smoothBedTemp    == s.bedTemp    &&
+                     smoothPartFan    == (float)s.coolingFanPct &&
+                     smoothAuxFan     == (float)s.auxFanPct     &&
+                     smoothChamberFan == (float)s.chamberFanPct);
 }
+
+bool printerGaugesSettled() { return smoothSettled; }
 
 // ---------------------------------------------------------------------------
 //  Color helpers
@@ -604,8 +614,8 @@ static void updateETA(const BambuState& s) {
                 snprintf(buf, sizeof(buf), "ETA: %d.%02d %02d:%02d",
                          eta.tm_mday, eta.tm_mon + 1, h, eta.tm_min);
             else
-                snprintf(buf, sizeof(buf), "ETA: %d.%02d %d:%02d%s",
-                         eta.tm_mday, eta.tm_mon + 1, h, eta.tm_min, ampm);
+                snprintf(buf, sizeof(buf), "ETA: %d/%02d %d:%02d%s",
+                         eta.tm_mon + 1, eta.tm_mday, h, eta.tm_min, ampm);
         } else {
             if (netSettings.use24h)
                 snprintf(buf, sizeof(buf), "ETA: %02d:%02d", h, eta.tm_min);

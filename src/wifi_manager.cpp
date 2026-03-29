@@ -68,19 +68,24 @@ void initWiFi() {
       }
     }
 
-    WiFi.begin(wifiSSID, wifiPass);
     setScreenState(SCREEN_CONNECTING_WIFI);
-
     Serial.printf("Connecting to WiFi: %s\n", wifiSSID);
 
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED &&
-           millis() - start < WIFI_CONNECT_TIMEOUT) {
-      delay(100);
-      updateDisplay();
+    bool connected = false;
+    for (uint8_t attempt = 1; attempt <= 3 && !connected; attempt++) {
+      Serial.printf("WiFi attempt %d/3...\n", attempt);
+      WiFi.disconnect(true);
+      WiFi.begin(wifiSSID, wifiPass);
+      unsigned long start = millis();
+      while (WiFi.status() != WL_CONNECTED &&
+             millis() - start < WIFI_CONNECT_TIMEOUT) {
+        delay(100);
+        updateDisplay();
+      }
+      connected = (WiFi.status() == WL_CONNECTED);
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (connected) {
       Serial.printf("WiFi connected! IP: %s\n",
                     WiFi.localIP().toString().c_str());
       apMode = false;

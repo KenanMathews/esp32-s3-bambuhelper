@@ -210,7 +210,7 @@ static void parseMqttPayload(byte* payload, unsigned int length,
     while (objStart < payloadEnd && (*objStart == ' ' || *objStart == '\t')) objStart++;
     if (objStart < payloadEnd && *objStart == '{') {
       JsonDocument extDoc;
-      if (!deserializeJson(extDoc, objStart)) {
+      if (!deserializeJson(extDoc, objStart, (size_t)(payloadEnd - objStart))) {
         JsonArray info = extDoc["info"];
         if (info.size() >= 2) {
           if (!s.dualNozzle) Serial.println("MQTT: dual nozzle DETECTED (H2D/H2C)");
@@ -225,12 +225,19 @@ static void parseMqttPayload(byte* payload, unsigned int length,
           for (JsonObject entry : info) {
             if (!entry["id"].is<int>()) continue;
             uint8_t id = entry["id"].as<int>();
-            if (id == s.activeNozzle && entry["temp"].is<unsigned int>()) {
-              uint32_t packed = entry["temp"].as<unsigned int>();
-              s.nozzleTemp   = (float)(packed & 0xFFFF);
-              s.nozzleTarget = (float)(packed >> 16);
-              s.lastUpdate = millis();
-              MQTT_LOG("dual nozzle=%d temp=%.0f target=%.0f", s.activeNozzle, s.nozzleTemp, s.nozzleTarget);
+            if (id == s.activeNozzle) {
+              if (entry["temp"].is<unsigned int>()) {
+                uint32_t packed = entry["temp"].as<unsigned int>();
+                s.nozzleTemp   = (float)(packed & 0xFFFF);
+                s.nozzleTarget = (float)(packed >> 16);
+                s.lastUpdate = millis();
+                MQTT_LOG("dual nozzle=%d temp=%.0f target=%.0f", s.activeNozzle, s.nozzleTemp, s.nozzleTarget);
+              }
+              // snow = active tray for this nozzle (fixes right nozzle filament display)
+              if (entry["snow"].is<int>()) {
+                s.ams.activeTray = (uint8_t)entry["snow"].as<int>();
+                MQTT_LOG("dual nozzle=%d activeTray=%d (from snow)", s.activeNozzle, s.ams.activeTray);
+              }
               break;
             }
           }
@@ -323,7 +330,7 @@ static void parseMqttPayload(byte* payload, unsigned int length,
       while (v < payloadEnd && (*v == ' ' || *v == '\n' || *v == '\r' || *v == '\t')) v++;
       if (v < payloadEnd && *v == '{') {
         JsonDocument vtDoc;
-        if (!deserializeJson(vtDoc, v)) {
+        if (!deserializeJson(vtDoc, v, (size_t)(payloadEnd - v))) {
           if (vtDoc["tray_type"].is<const char*>()) {
             s.ams.vtPresent = true;
             if (vtDoc["tray_color"].is<const char*>())
@@ -445,6 +452,17 @@ static void parseMqttPayload(byte* payload, unsigned int length,
 
   if (print["spd_lvl"].is<int>())
     s.speedLevel = print["spd_lvl"].as<int>();
+
+  // Door sensor (H2 series): stat field bit 0x00800000
+  if (print["stat"].is<const char*>()) {
+    uint32_t statVal = strtoul(print["stat"].as<const char*>(), nullptr, 16);
+    s.doorOpen = (statVal & 0x00800000) != 0;
+    s.doorSensorPresent = true;
+  } else if (print["stat"].is<unsigned int>()) {
+    uint32_t statVal = (uint32_t)print["stat"].as<unsigned int>();
+    s.doorOpen = (statVal & 0x00800000) != 0;
+    s.doorSensorPresent = true;
+  }
 
   s.lastUpdate = millis();
 }
@@ -698,8 +716,9 @@ static void handleConn(MqttConn& c) {
 
   unsigned long staleMs = isCloudMode(cfg.mode) ? BAMBU_STALE_TIMEOUT * 5 : BAMBU_STALE_TIMEOUT;
   if (s.lastUpdate > 0 && millis() - s.lastUpdate > staleMs) {
-    if (s.printing) {
+    if (s.printing || strcmp(s.gcodeState, "IDLE") != 0) {
       s.printing = false;
+      strlcpy(s.gcodeState, "IDLE", sizeof(s.gcodeState));
     }
   }
 }
@@ -745,7 +764,9 @@ void initBambuMqtt() {
   // First: do all cloud API work (userId extraction) before any MQTT connects
   for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
     PrinterConfig& cfg = printers[i].config;
-    if (isPrinterConfigured(i) && isCloudMode(cfg.mode) && strlen(cfg.cloudUserId) == 0) {
+    // Self-heal: extract userId for cloud slots with serial+token but missing userId.
+    // isPrinterConfigured() requires cloudUserId, so check preconditions independently.
+    if (isCloudMode(cfg.mode) && strlen(cfg.serial) > 0 && strlen(cfg.cloudUserId) == 0) {
       Serial.printf("MQTT: [%d] cloud printer needs userId extraction\n", i);
       // userId extraction uses HTTPClient (TLS) — must complete before MQTT TLS
       char tokenBuf[1200];

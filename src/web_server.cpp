@@ -11,6 +11,7 @@
 #include "timezones.h"
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include <Update.h>
 
 static WebServer server(80);
 
@@ -264,6 +265,25 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         <label for="clock">Show clock after print (instead of screen off)</label>
       </div>
       <div class="check-row">
+        <input type="checkbox" id="dack" value="1" %DACK%>
+        <label for="dack">Wait for door open after print (H2 series)</label>
+      </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #30363D">
+        <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Night Mode</h3>
+        <div class="check-row">
+          <input type="checkbox" id="night" value="1" %NIGHT%>
+          <label for="night">Enable scheduled brightness dimming</label>
+        </div>
+        <label for="nstart">Start hour (0-23)</label>
+        <input type="number" id="nstart" min="0" max="23" value="%NSTART%">
+        <label for="nend">End hour (0-23)</label>
+        <input type="number" id="nend" min="0" max="23" value="%NEND%">
+        <label for="nbright">Night brightness (0-255)</label>
+        <input type="number" id="nbright" min="0" max="255" value="%NBRIGHT%">
+        <label for="ssbright">Screensaver brightness on clock/idle (0 = off)</label>
+        <input type="number" id="ssbright" min="0" max="255" value="%SSBRIGHT%">
+      </div>
+      <div class="check-row">
         <input type="checkbox" id="abar" value="1" %ABAR%>
         <label for="abar">Animated progress bar (shimmer effect)</label>
       </div>
@@ -445,6 +465,23 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
           <button type="button" class="btn btn-primary" style="margin-top:8px;font-size:13px;padding:8px"
                   onclick="importSettings()">Import &amp; Restart</button>
           <div id="importStatus" style="margin-top:8px;font-size:13px"></div>
+        </div>
+      </div>
+      <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
+        <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Firmware Update (OTA)</h3>
+        <p style="font-size:11px;color:#8B949E;margin-bottom:10px">
+          Upload a .bin firmware file. All settings are preserved. Device restarts automatically.
+        </p>
+        <input type="file" id="otaFile" accept=".bin"
+               style="width:100%;margin-top:4px;padding:6px;background:#0D1117;border:1px solid #30363D;border-radius:6px;color:#C9D1D9">
+        <button type="button" class="btn btn-primary" style="margin-top:8px;font-size:13px;padding:8px"
+                onclick="startOta()">Upload &amp; Flash</button>
+        <div id="otaStatus" style="margin-top:8px;font-size:13px"></div>
+        <div id="otaProgress" style="display:none;margin-top:8px">
+          <div style="background:#21262D;border-radius:4px;height:12px;overflow:hidden">
+            <div id="otaBar" style="height:100%;width:0%;background:#238636;transition:width 0.3s"></div>
+          </div>
+          <div id="otaPct" style="font-size:12px;color:#8B949E;margin-top:4px;text-align:center">0%</div>
         </div>
       </div>
       <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
@@ -687,6 +724,12 @@ function applyDisplay(){
   p.append('fmins',document.getElementById('fmins').value);
   if(document.getElementById('keepon').checked) p.append('keepon','1');
   if(document.getElementById('clock').checked) p.append('clock','1');
+  if(document.getElementById('dack').checked) p.append('dack','1');
+  if(document.getElementById('night').checked) p.append('night','1');
+  p.append('nstart',document.getElementById('nstart').value);
+  p.append('nend',document.getElementById('nend').value);
+  p.append('nbright',document.getElementById('nbright').value);
+  p.append('ssbright',document.getElementById('ssbright').value);
   if(document.getElementById('abar').checked) p.append('abar','1');
   if(document.getElementById('pong').checked) p.append('pong','1');
   if(document.getElementById('slbl').checked) p.append('slbl','1');
@@ -790,6 +833,53 @@ function importSettings(){
     .catch(function(){
       stat.innerHTML='<span style="color:#F85149">Upload failed</span>';
     });
+}
+
+function startOta(){
+  var f=document.getElementById('otaFile').files[0];
+  if(!f){showToast('Select a .bin file first');return;}
+  if(!f.name.endsWith('.bin')){showToast('File must be a .bin firmware file');return;}
+  if(f.size<32768){showToast('File too small — not a valid firmware');return;}
+  if(f.size>1310720){showToast('File too large (max 1.25 MB)');return;}
+  if(!confirm('Flash this firmware? Device will restart. All settings are preserved.')) return;
+  var stat=document.getElementById('otaStatus');
+  var prog=document.getElementById('otaProgress');
+  var bar=document.getElementById('otaBar');
+  var pct=document.getElementById('otaPct');
+  stat.innerHTML='<span style="color:#58A6FF">Uploading...</span>';
+  prog.style.display='block';
+  var fd=new FormData();
+  fd.append('firmware',f);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/ota/upload',true);
+  xhr.upload.onprogress=function(e){
+    if(e.lengthComputable){
+      var p=Math.round(e.loaded/e.total*100);
+      bar.style.width=p+'%';
+      pct.textContent=p+'%';
+    }
+  };
+  xhr.onload=function(){
+    try{
+      var d=JSON.parse(xhr.responseText);
+      if(d.status==='ok'){
+        stat.innerHTML='<span style="color:#3FB950">'+d.message+'</span>';
+        bar.style.width='100%';
+        bar.style.background='#3FB950';
+      } else {
+        stat.innerHTML='<span style="color:#F85149">Error: '+d.message+'</span>';
+        prog.style.display='none';
+      }
+    } catch(e){
+      stat.innerHTML='<span style="color:#F85149">Unexpected response</span>';
+      prog.style.display='none';
+    }
+  };
+  xhr.onerror=function(){
+    stat.innerHTML='<span style="color:#F85149">Upload failed — check connection</span>';
+    prog.style.display='none';
+  };
+  xhr.send(fd);
 }
 
 // Pong clock checkbox depends on clock-after-print being enabled
@@ -896,6 +986,12 @@ static String processTemplate(const String& html) {
   page.replace("%FMINS%", String(dpSettings.finishDisplayMins));
   page.replace("%KEEPON%", dpSettings.keepDisplayOn ? "checked" : "");
   page.replace("%CLOCK%", dpSettings.showClockAfterFinish ? "checked" : "");
+  page.replace("%DACK%", dpSettings.doorAckEnabled ? "checked" : "");
+  page.replace("%NIGHT%", dpSettings.nightModeEnabled ? "checked" : "");
+  page.replace("%NSTART%", String(dpSettings.nightStartHour));
+  page.replace("%NEND%", String(dpSettings.nightEndHour));
+  page.replace("%NBRIGHT%", String(dpSettings.nightBrightness));
+  page.replace("%SSBRIGHT%", String(dpSettings.screensaverBrightness));
   page.replace("%ABAR%", dispSettings.animatedBar ? "checked" : "");
   page.replace("%PONG%", dispSettings.pongClock ? "checked" : "");
   page.replace("%SLBL%", dispSettings.smallLabels ? "checked" : "");
@@ -986,6 +1082,12 @@ static void readDisplayFromForm() {
   }
   dpSettings.keepDisplayOn = server.hasArg("keepon");
   dpSettings.showClockAfterFinish = server.hasArg("clock");
+  dpSettings.doorAckEnabled = server.hasArg("dack");
+  dpSettings.nightModeEnabled = server.hasArg("night");
+  if (server.hasArg("nstart")) dpSettings.nightStartHour = (uint8_t)constrain(server.arg("nstart").toInt(), 0, 23);
+  if (server.hasArg("nend"))   dpSettings.nightEndHour   = (uint8_t)constrain(server.arg("nend").toInt(),   0, 23);
+  if (server.hasArg("nbright"))  dpSettings.nightBrightness       = (uint8_t)constrain(server.arg("nbright").toInt(),  0, 255);
+  if (server.hasArg("ssbright")) dpSettings.screensaverBrightness = (uint8_t)constrain(server.arg("ssbright").toInt(), 0, 255);
   dispSettings.animatedBar = server.hasArg("abar");
   dispSettings.pongClock = server.hasArg("pong");
   dispSettings.smallLabels = server.hasArg("slbl");
@@ -1495,6 +1597,77 @@ static void handleNotFound() {
 }
 
 // ---------------------------------------------------------------------------
+//  OTA firmware update
+// ---------------------------------------------------------------------------
+static bool   s_otaInProgress  = false;
+static bool   s_otaFirstChunk  = false;
+static String s_otaError       = "";
+
+static void handleOtaUpload() {
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    s_otaError       = "";
+    s_otaInProgress  = true;
+    s_otaFirstChunk  = true;
+    Serial.printf("OTA: start, file=%s size=%u\n",
+                  upload.filename.c_str(), upload.totalSize);
+    disconnectBambuMqtt();
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      s_otaError      = Update.errorString();
+      s_otaInProgress = false;
+      Serial.printf("OTA: begin failed: %s\n", s_otaError.c_str());
+    }
+
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!s_otaInProgress) return;
+    // Validate ESP32 magic byte on first chunk
+    if (s_otaFirstChunk && upload.currentSize > 0) {
+      s_otaFirstChunk = false;
+      if (upload.buf[0] != 0xE9) {
+        s_otaError      = "Invalid firmware (bad magic byte)";
+        s_otaInProgress = false;
+        Update.abort();
+        return;
+      }
+    }
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      s_otaError      = Update.errorString();
+      s_otaInProgress = false;
+      Update.abort();
+    }
+
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (!s_otaInProgress) return;
+    if (!Update.end(true)) {
+      s_otaError = Update.errorString();
+      Serial.printf("OTA: end failed: %s\n", s_otaError.c_str());
+    } else {
+      Serial.printf("OTA: success, %u bytes written\n", upload.totalSize);
+    }
+    s_otaInProgress = false;
+
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    s_otaInProgress = false;
+    Serial.println("OTA: aborted");
+  }
+}
+
+static void handleOtaFinish() {
+  if (s_otaError.length() > 0) {
+    String msg = "{\"status\":\"error\",\"message\":\"" + s_otaError + "\"}";
+    server.send(400, "application/json", msg);
+    s_otaError = "";
+    return;
+  }
+  server.send(200, "application/json",
+    "{\"status\":\"ok\",\"message\":\"Update successful. Restarting...\"}");
+  delay(1500);
+  ESP.restart();
+}
+
+// ---------------------------------------------------------------------------
 //  Init & handle
 // ---------------------------------------------------------------------------
 void initWebServer() {
@@ -1512,6 +1685,7 @@ void initWebServer() {
   server.on("/cloud/logout", HTTP_POST, handleCloudLogout);
   server.on("/settings/export", HTTP_GET, handleSettingsExport);
   server.on("/settings/import", HTTP_POST, handleSettingsImportFinish, handleSettingsImportUpload);
+  server.on("/ota/upload", HTTP_POST, handleOtaFinish, handleOtaUpload);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("Web server started on port 80");

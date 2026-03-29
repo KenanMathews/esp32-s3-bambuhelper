@@ -34,7 +34,6 @@ uint16_t htmlToRgb565(const char* hex) {
 uint16_t bambuColorToRgb565(const char* rrggbbaa) {
   if (!rrggbbaa || strlen(rrggbbaa) < 6) return 0;
   uint32_t rgba = strtoul(rrggbbaa, nullptr, 16);
-  // RRGGBBAA: shift depends on length (6 = RRGGBB, 8 = RRGGBBAA)
   uint8_t r, g, b;
   if (strlen(rrggbbaa) >= 8) {
     r = (rgba >> 24) & 0xFF;
@@ -45,6 +44,28 @@ uint16_t bambuColorToRgb565(const char* rrggbbaa) {
     g = (rgba >> 8) & 0xFF;
     b = rgba & 0xFF;
   }
+
+  // Saturation boost: Bambu Lab MQTT colors are often washed-out pastels
+  uint8_t max_val = (r > g) ? (r > b ? r : b) : (g > b ? g : b);
+  uint8_t min_val = (r < g) ? (r < b ? r : b) : (g < b ? g : b);
+  if (max_val > 0 && (max_val - min_val) > (max_val / 10)) {
+    float scale = (float)max_val / (float)(max_val - min_val);
+    float fr = (r - min_val) * scale;
+    float fg = (g - min_val) * scale;
+    float fb = (b - min_val) * scale;
+    float blend = 0.65f;
+    r = (uint8_t)(r + (fr - r) * blend);
+    g = (uint8_t)(g + (fg - g) * blend);
+    b = (uint8_t)(b + (fb - b) * blend);
+  }
+  // Brightness boost for dim colors
+  if (max_val > 0 && max_val < 220) {
+    float bs = 220.0f / max_val;
+    r = (uint8_t)min(255.0f, r * bs);
+    g = (uint8_t)min(255.0f, g * bs);
+    b = (uint8_t)min(255.0f, b * bs);
+  }
+
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
@@ -199,16 +220,28 @@ void loadSettings() {
       }
     }
     // Save new format so migration only happens once
+    // Must reopen in write mode — loadSettings() opens read-only
+    prefs.end();
+    prefs.begin(NVS_NAMESPACE, false);
     prefs.putString("net_tzstr", netSettings.timezoneStr);
     prefs.putUChar("net_tzidx", netSettings.timezoneIndex);
+    prefs.end();
+    prefs.begin(NVS_NAMESPACE, true);
     Serial.printf("Timezone migrated from offset %d -> %s\n", oldOffset, netSettings.timezoneStr);
   }
   netSettings.use24h = prefs.getBool("net_24h", true);
 
   // Display power settings
-  dpSettings.finishDisplayMins = prefs.getUShort("dp_fmins", 3);
-  dpSettings.keepDisplayOn = prefs.getBool("dp_keepon", false);
-  dpSettings.showClockAfterFinish = prefs.getBool("dp_clock", true);
+  dpSettings.finishDisplayMins     = prefs.getUShort("dp_fmins",   3);
+  dpSettings.keepDisplayOn         = prefs.getBool("dp_keepon",    false);
+  dpSettings.showClockAfterFinish  = prefs.getBool("dp_clock",     true);
+  dpSettings.nightModeEnabled      = prefs.getBool("dp_night",     false);
+  dpSettings.nightStartHour        = prefs.getUChar("dp_nstart",   22);
+  dpSettings.nightEndHour          = prefs.getUChar("dp_nend",     7);
+  dpSettings.nightBrightness       = prefs.getUChar("dp_nbright",  30);
+  dpSettings.screensaverBrightness = prefs.getUChar("dp_ssbright", 30);
+  dpSettings.doorAckEnabled        = prefs.getBool("dp_dack",      false);
+
 
   // Rotation settings (multi-printer)
   rotState.mode = (RotateMode)prefs.getUChar("rot_mode", ROTATE_SMART);
@@ -272,9 +305,15 @@ void saveSettings() {
   prefs.putBool("net_24h", netSettings.use24h);
 
   // Display power settings
-  prefs.putUShort("dp_fmins", dpSettings.finishDisplayMins);
-  prefs.putBool("dp_keepon", dpSettings.keepDisplayOn);
-  prefs.putBool("dp_clock", dpSettings.showClockAfterFinish);
+  prefs.putUShort("dp_fmins",   dpSettings.finishDisplayMins);
+  prefs.putBool("dp_keepon",    dpSettings.keepDisplayOn);
+  prefs.putBool("dp_clock",     dpSettings.showClockAfterFinish);
+  prefs.putBool("dp_night",     dpSettings.nightModeEnabled);
+  prefs.putUChar("dp_nstart",   dpSettings.nightStartHour);
+  prefs.putUChar("dp_nend",     dpSettings.nightEndHour);
+  prefs.putUChar("dp_nbright",  dpSettings.nightBrightness);
+  prefs.putUChar("dp_ssbright", dpSettings.screensaverBrightness);
+  prefs.putBool("dp_dack",      dpSettings.doorAckEnabled);
 
   prefs.end();
 }

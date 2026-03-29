@@ -31,5 +31,6 @@ ScreenState getScreenState();
 void setBacklight(uint8_t level);
 void applyDisplaySettings();     // re-apply rotation / bg color after settings change
 void triggerDisplayTransition(); // called on multi-printer rotation to reset gauges
+void checkNightMode();           // apply night/screensaver brightness each loop
 
 #endif // DISPLAY_UI_H

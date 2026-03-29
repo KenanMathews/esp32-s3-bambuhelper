@@ -42,9 +42,18 @@ struct NetworkSettings {
 
 // Display power settings
 struct DisplayPowerSettings {
-  uint16_t finishDisplayMins;  // minutes to show finish screen (0 = keep on)
-  bool keepDisplayOn;          // override: never turn off display
-  bool showClockAfterFinish;   // show clock instead of turning display off
+  uint16_t finishDisplayMins;   // minutes to show finish screen (0 = keep on)
+  bool     keepDisplayOn;       // override: never turn off display
+  bool     showClockAfterFinish;// show clock instead of turning display off
+  // Night mode (scheduled brightness reduction)
+  bool     nightModeEnabled;
+  uint8_t  nightStartHour;      // 0-23
+  uint8_t  nightEndHour;        // 0-23 (wrap-around supported, e.g. 22→7)
+  uint8_t  nightBrightness;     // brightness during night hours
+  // Screensaver brightness (clock/idle screen)
+  uint8_t  screensaverBrightness;
+  // Door sensor acknowledgment (H2 series)
+  bool     doorAckEnabled;      // hold finish screen until door opens
 };
 
 // Buzzer settings

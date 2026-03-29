@@ -18,4 +18,7 @@ lv_obj_t* printerScreenGet();
 // Reset smooth-gauge interpolation state (call on printer rotation / settings change).
 void printerScreenTransition();
 
+// Returns false while gauge values are still interpolating (use for adaptive refresh rate).
+bool printerGaugesSettled();
+
 #endif // SCREEN_PRINTER_H
