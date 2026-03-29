@@ -468,6 +468,19 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
         </div>
       </div>
       <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
+        <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">App Store</h3>
+        <p style="font-size:11px;color:#8B949E;margin-bottom:10px">
+          URL of the store index.json. Leave blank to use the default public store.
+        </p>
+        <label for="storeUrl" style="font-size:12px">Store Index URL</label>
+        <input type="text" id="storeUrl" value="%STORE_URL%"
+               placeholder="https://example.com/store/index.json"
+               style="width:100%;margin-top:4px;padding:8px;background:#0D1117;border:1px solid #30363D;border-radius:6px;color:#C9D1D9;font-size:13px;box-sizing:border-box">
+        <button type="button" class="btn btn-blue" style="margin-top:8px;font-size:13px;padding:8px"
+                onclick="saveStoreUrl()">Save Store URL</button>
+        <div id="storeUrlStatus" style="margin-top:8px;font-size:13px"></div>
+      </div>
+      <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
         <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Firmware Update (OTA)</h3>
         <p style="font-size:11px;color:#8B949E;margin-bottom:10px">
           Upload a .bin firmware file. All settings are preserved. Device restarts automatically.
@@ -835,6 +848,15 @@ function importSettings(){
     });
 }
 
+function saveStoreUrl(){
+  var url=document.getElementById('storeUrl').value.trim();
+  var stat=document.getElementById('storeUrlStatus');
+  stat.style.color='#8B949E'; stat.textContent='Saving...';
+  fetch('/save/storeurl',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'url='+encodeURIComponent(url)})
+    .then(r=>r.text()).then(()=>{stat.style.color='#3FB950';stat.textContent='Saved';})
+    .catch(()=>{stat.style.color='#F85149';stat.textContent='Error';});
+}
 function startOta(){
   var f=document.getElementById('otaFile').files[0];
   if(!f){showToast('Select a .bin file first');return;}
@@ -1038,6 +1060,7 @@ static String processTemplate(const String& html) {
   page.replace("%BUZ_PIN%", String(buzzerSettings.pin));
   page.replace("%BUZ_QS%", String(buzzerSettings.quietStartHour));
   page.replace("%BUZ_QE%", String(buzzerSettings.quietEndHour));
+  page.replace("%STORE_URL%", storeUrl);
 
   return page;
 }
@@ -1443,6 +1466,9 @@ static void handleSettingsExport() {
   buz["quietStart"] = buzzerSettings.quietStartHour;
   buz["quietEnd"] = buzzerSettings.quietEndHour;
 
+  // Store
+  doc["storeUrl"] = storeUrl;
+
   String json;
   serializeJsonPretty(doc, json);
 
@@ -1576,6 +1602,9 @@ static void handleSettingsImportFinish() {
     if (buz["quietEnd"].is<uint8_t>())   buzzerSettings.quietEndHour = buz["quietEnd"].as<uint8_t>();
   }
 
+  // Store URL
+  if (doc["storeUrl"].is<const char*>()) strlcpy(storeUrl, doc["storeUrl"], sizeof(storeUrl));
+
   // Save everything to NVS
   saveSettings();
   saveRotationSettings();
@@ -1668,6 +1697,19 @@ static void handleOtaFinish() {
 }
 
 // ---------------------------------------------------------------------------
+//  Save store URL
+// ---------------------------------------------------------------------------
+static void handleSaveStoreUrl() {
+  if (server.hasArg("url")) {
+    String url = server.arg("url");
+    url.trim();
+    strlcpy(storeUrl, url.c_str(), sizeof(storeUrl));
+    saveSettings();
+  }
+  server.send(200, "text/plain", "OK");
+}
+
+// ---------------------------------------------------------------------------
 //  Init & handle
 // ---------------------------------------------------------------------------
 void initWebServer() {
@@ -1675,6 +1717,7 @@ void initWebServer() {
   server.on("/save/wifi", HTTP_POST, handleSaveWifi);
   server.on("/save/printer", HTTP_POST, handleSavePrinter);
   server.on("/save/rotation", HTTP_POST, handleSaveRotation);
+  server.on("/save/storeurl", HTTP_POST, handleSaveStoreUrl);
   server.on("/buzzer/test", HTTP_POST, handleBuzzerTest);
   server.on("/printer/config", HTTP_GET, handlePrinterConfig);
   server.on("/apply", HTTP_POST, handleApply);

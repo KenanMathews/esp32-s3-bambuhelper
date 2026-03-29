@@ -15,6 +15,7 @@ NetworkSettings netSettings;
 DisplayPowerSettings dpSettings;
 char cloudEmail[64] = {0};
 BuzzerSettings buzzerSettings = { false, BUZZER_DEFAULT_PIN, 0, 0 };
+char storeUrl[256] = {0};
 
 static Preferences prefs;
 
@@ -260,6 +261,9 @@ void loadSettings() {
   // Cloud email (display only)
   strlcpy(cloudEmail, prefs.getString("cl_email", "").c_str(), sizeof(cloudEmail));
 
+  // Store URL
+  strlcpy(storeUrl, prefs.getString("app_store_url", "").c_str(), sizeof(storeUrl));
+
   prefs.end();
 }
 
@@ -314,6 +318,9 @@ void saveSettings() {
   prefs.putUChar("dp_nbright",  dpSettings.nightBrightness);
   prefs.putUChar("dp_ssbright", dpSettings.screensaverBrightness);
   prefs.putBool("dp_dack",      dpSettings.doorAckEnabled);
+
+  // Store URL
+  prefs.putString("app_store_url", storeUrl);
 
   prefs.end();
 }

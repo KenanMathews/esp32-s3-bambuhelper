@@ -2,16 +2,29 @@
 #define CONFIG_H
 
 // =============================================================================
+//  Target hardware: Waveshare ESP32-S3-Touch-LCD-1.28
+// =============================================================================
+//  MCU      : ESP32-S3 (dual-core Xtensa LX7 @ 240MHz)
+//  Flash    : 16MB (DIO mode)
+//  PSRAM    : 2MB (QIO QSPI)
+//  Display  : GC9A01A round TFT, 240×240, RGB565, SPI2/FSPI @ 40MHz
+//               MOSI=11  SCLK=10  CS=9  DC=8  RST=14  BL=2
+//  Touch    : CST816S capacitive, I2C @ 400kHz, addr 0x15
+//               SDA=6  SCL=7  INT=5  RST=13
+//  USB      : Native USB-CDC (S3 built-in, boot=CDC enabled)
+//  No onboard button or buzzer — GPIO 4/5 available for external use
+
+// =============================================================================
 //  Firmware version
 // =============================================================================
-#define FW_VERSION          "v2.4-ws240"  // ws240 = Waveshare 240x240 fork
+#define FW_VERSION          "v2.4-ws240"  // ws240 = Waveshare 240×240 fork
 
 // =============================================================================
 //  Display
 // =============================================================================
 #define SCREEN_W        240
 #define SCREEN_H        240
-#define BACKLIGHT_PIN   TFT_BL  // GPIO 13
+#define BACKLIGHT_PIN   TFT_BL  // GPIO 2 (Waveshare ws1.28: TFT_BL=2)
 #define BACKLIGHT_CH    0
 #define BACKLIGHT_FREQ  5000
 #define BACKLIGHT_RES   8

@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 // ---------------------------------------------------------------------------
-//  PSRAM allocator and VM state — compiled only with Lua
+//  PSRAM allocator and VM state
 // ---------------------------------------------------------------------------
 #ifdef LUA_AVAILABLE
 static void* lua_psram_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
@@ -27,9 +27,12 @@ static lua_State* L = nullptr;
 #endif
 
 // ---------------------------------------------------------------------------
-//  Shared state (always compiled so headers stay consistent)
+//  Shared state
 // ---------------------------------------------------------------------------
-static char s_lastError[128] = "";
+static char  s_lastError[128] = "";
+static bool  s_running        = false;   // tick loop active
+static int   s_tickRef        = LUA_NOREF;
+static unsigned long s_lastTickMs = 0;
 
 // ---------------------------------------------------------------------------
 //  luaRuntimeInit
@@ -39,13 +42,12 @@ bool luaRuntimeInit() {
     Serial.println("LuaRuntime: LUA_AVAILABLE not defined — Lua disabled");
     return false;
 #else
-    if (L) {
-        lua_close(L);
-        L = nullptr;
-    }
+    s_running  = false;
+    s_tickRef  = LUA_NOREF;
+    if (L) { lua_close(L); L = nullptr; }
+
     L = lua_newstate(lua_psram_alloc, nullptr);
     if (!L) {
-        Serial.println("LuaRuntime: lua_newstate failed");
         strlcpy(s_lastError, "lua_newstate failed", sizeof(s_lastError));
         return false;
     }
@@ -58,6 +60,9 @@ bool luaRuntimeInit() {
 
 // ---------------------------------------------------------------------------
 //  luaRuntimeRun
+//  Loads and executes the script.  If the script calls sys.on_tick(fn),
+//  s_tickRef is set and luaRuntimeRunning() returns true — the caller must
+//  pump luaRuntimeTick() every loop iteration.
 // ---------------------------------------------------------------------------
 bool luaRuntimeRun(const char* script, size_t len, const char* name) {
 #ifndef LUA_AVAILABLE
@@ -69,6 +74,8 @@ bool luaRuntimeRun(const char* script, size_t len, const char* name) {
         return false;
     }
     s_lastError[0] = '\0';
+    s_tickRef      = LUA_NOREF;
+    s_running      = false;
 
     int loadResult = luaL_loadbuffer(L, script, len, name ? name : "?");
     if (loadResult != LUA_OK) {
@@ -88,33 +95,79 @@ bool luaRuntimeRun(const char* script, size_t len, const char* name) {
         return false;
     }
 
+    // If script registered a tick function, enter tick-loop mode
+    s_tickRef  = sdkGetTickRef(L);
+    s_running  = (s_tickRef != LUA_NOREF);
+    s_lastTickMs = millis();
     return true;
 #endif
 }
 
 // ---------------------------------------------------------------------------
-//  luaRuntimeStop — reset VM (close + reopen)
+//  luaRuntimeTick — called every loop() when SCREEN_APP is active
+//  Returns false when the app has finished (caller should release screen).
 // ---------------------------------------------------------------------------
-void luaRuntimeStop() {
-#ifdef LUA_AVAILABLE
-    if (L) {
-        lua_close(L);
-        L = nullptr;
+bool luaRuntimeTick() {
+#ifndef LUA_AVAILABLE
+    return false;
+#else
+    if (!s_running || !L || s_tickRef == LUA_NOREF) return false;
+
+    unsigned long now = millis();
+    unsigned long dt  = now - s_lastTickMs;
+    s_lastTickMs = now;
+
+    // Check sys.exit() flag set during a previous tick
+    if (sdkExitRequested()) {
+        sdkClearExitFlag();
+        s_running = false;
+        luaL_unref(L, LUA_REGISTRYINDEX, s_tickRef);
+        s_tickRef = LUA_NOREF;
+        return false;
     }
-    luaRuntimeInit();
+
+    lua_rawgeti(L, LUA_REGISTRYINDEX, s_tickRef);
+    lua_pushinteger(L, (long long)dt);
+    int result = lua_pcall(L, 1, 0, 0);
+    if (result != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        strlcpy(s_lastError, err ? err : "tick error", sizeof(s_lastError));
+        lua_pop(L, 1);
+        Serial.printf("LuaRuntime: tick error: %s\n", s_lastError);
+        s_running = false;
+        luaL_unref(L, LUA_REGISTRYINDEX, s_tickRef);
+        s_tickRef = LUA_NOREF;
+        return false;
+    }
+
+    // Check exit flag again — may have been set inside the tick
+    if (sdkExitRequested()) {
+        sdkClearExitFlag();
+        s_running = false;
+        luaL_unref(L, LUA_REGISTRYINDEX, s_tickRef);
+        s_tickRef = LUA_NOREF;
+        return false;
+    }
+
+    return true;
 #endif
 }
 
 // ---------------------------------------------------------------------------
-//  luaRuntimeRunning — async execution is future work
+//  luaRuntimeStop
 // ---------------------------------------------------------------------------
-bool luaRuntimeRunning() {
-    return false;
+void luaRuntimeStop() {
+#ifdef LUA_AVAILABLE
+    s_running = false;
+    if (L && s_tickRef != LUA_NOREF) {
+        luaL_unref(L, LUA_REGISTRYINDEX, s_tickRef);
+        s_tickRef = LUA_NOREF;
+    }
+    if (L) { lua_close(L); L = nullptr; }
+    luaRuntimeInit();
+#endif
 }
 
-// ---------------------------------------------------------------------------
-//  luaRuntimeLastError
-// ---------------------------------------------------------------------------
-const char* luaRuntimeLastError() {
-    return s_lastError;
-}
+bool luaRuntimeRunning() { return s_running; }
+
+const char* luaRuntimeLastError() { return s_lastError; }

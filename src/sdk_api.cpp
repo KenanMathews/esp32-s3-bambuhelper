@@ -6,7 +6,11 @@
 
 #include "bambu_state.h"
 #include "buzzer.h"
+#include "settings.h"
 #include <lvgl.h>
+#include <HTTPClient.h>
+#include <LittleFS.h>
+#include <ArduinoJson.h>
 
 extern "C" {
 #include "lua.h"
@@ -15,15 +19,21 @@ extern "C" {
 }
 
 // ---------------------------------------------------------------------------
-//  sys.exit() flag — lua_runtime.cpp checks this after pcall
+//  Internal flags / refs
 // ---------------------------------------------------------------------------
 static bool g_exit_requested = false;
+static int  g_tick_ref       = LUA_NOREF;  // set by sys.on_tick()
 
 bool sdkExitRequested() { return g_exit_requested; }
 void sdkClearExitFlag()  { g_exit_requested = false; }
 
+int sdkGetTickRef(lua_State* L) {
+    (void)L;
+    return g_tick_ref;
+}
+
 // ---------------------------------------------------------------------------
-//  Color helper
+//  Helpers
 // ---------------------------------------------------------------------------
 static inline lv_color_t c565(uint16_t rgb565) {
     uint8_t r = ((rgb565 >> 11) & 0x1F) * 8;
@@ -32,119 +42,120 @@ static inline lv_color_t c565(uint16_t rgb565) {
     return lv_color_make(r, g, b);
 }
 
-// ---------------------------------------------------------------------------
-//  Font lookup by size
-// ---------------------------------------------------------------------------
 static const lv_font_t* font_by_size(int sz) {
     if (sz <= 14) return &lv_font_montserrat_14;
     if (sz <= 16) return &lv_font_montserrat_16;
     if (sz <= 20) return &lv_font_montserrat_20;
-    return &lv_font_montserrat_28;
+    if (sz <= 28) return &lv_font_montserrat_28;
+    return &lv_font_montserrat_40;
 }
 
-// ---------------------------------------------------------------------------
-//  Alignment string → lv_align_t
-// ---------------------------------------------------------------------------
 static lv_align_t parse_align(const char* s) {
     if (!s) return LV_ALIGN_DEFAULT;
-    if (strcmp(s, "center")     == 0) return LV_ALIGN_CENTER;
-    if (strcmp(s, "top_mid")    == 0) return LV_ALIGN_TOP_MID;
-    if (strcmp(s, "top_left")   == 0) return LV_ALIGN_TOP_LEFT;
-    if (strcmp(s, "top_right")  == 0) return LV_ALIGN_TOP_RIGHT;
-    if (strcmp(s, "bottom_mid") == 0) return LV_ALIGN_BOTTOM_MID;
-    if (strcmp(s, "bottom_left")== 0) return LV_ALIGN_BOTTOM_LEFT;
-    if (strcmp(s, "bottom_right")== 0)return LV_ALIGN_BOTTOM_RIGHT;
-    if (strcmp(s, "left_mid")   == 0) return LV_ALIGN_LEFT_MID;
-    if (strcmp(s, "right_mid")  == 0) return LV_ALIGN_RIGHT_MID;
+    if (strcmp(s, "center")      == 0) return LV_ALIGN_CENTER;
+    if (strcmp(s, "top_mid")     == 0) return LV_ALIGN_TOP_MID;
+    if (strcmp(s, "top_left")    == 0) return LV_ALIGN_TOP_LEFT;
+    if (strcmp(s, "top_right")   == 0) return LV_ALIGN_TOP_RIGHT;
+    if (strcmp(s, "bottom_mid")  == 0) return LV_ALIGN_BOTTOM_MID;
+    if (strcmp(s, "bottom_left") == 0) return LV_ALIGN_BOTTOM_LEFT;
+    if (strcmp(s, "bottom_right")== 0) return LV_ALIGN_BOTTOM_RIGHT;
+    if (strcmp(s, "left_mid")    == 0) return LV_ALIGN_LEFT_MID;
+    if (strcmp(s, "right_mid")   == 0) return LV_ALIGN_RIGHT_MID;
     return LV_ALIGN_DEFAULT;
 }
 
-// ---------------------------------------------------------------------------
-//  Helper: get typed field from Lua table (use native types to avoid
-//  extern-"C" typedef visibility issues with lua_Integer / lua_Number)
-// ---------------------------------------------------------------------------
 static long long tbl_int(lua_State* L, int idx, const char* key, long long def) {
     lua_getfield(L, idx, key);
     long long v = lua_isnil(L, -1) ? def : (long long)lua_tonumber(L, -1);
     lua_pop(L, 1);
     return v;
 }
-
 static double tbl_num(lua_State* L, int idx, const char* key, double def) {
     lua_getfield(L, idx, key);
     double v = lua_isnil(L, -1) ? def : (double)lua_tonumber(L, -1);
     lua_pop(L, 1);
     return v;
 }
-
 static const char* tbl_str(lua_State* L, int idx, const char* key, const char* def) {
     lua_getfield(L, idx, key);
     const char* v = lua_isnil(L, -1) ? def : lua_tostring(L, -1);
     lua_pop(L, 1);
     return v;
 }
+static bool tbl_bool(lua_State* L, int idx, const char* key, bool def) {
+    lua_getfield(L, idx, key);
+    bool v = lua_isnil(L, -1) ? def : (bool)lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return v;
+}
 
 // ===========================================================================
-//  bambu.* module
+//  bambu.* — printer state access (all fields)
 // ===========================================================================
 
 static int bambu_state(lua_State* L) {
-    lua_pushstring(L, displayedPrinter().state.gcodeState);
-    return 1;
-}
-
+    lua_pushstring(L, displayedPrinter().state.gcodeState); return 1; }
 static int bambu_progress(lua_State* L) {
-    lua_pushinteger(L, (long long)displayedPrinter().state.progress);
-    return 1;
-}
-
+    lua_pushinteger(L, displayedPrinter().state.progress); return 1; }
 static int bambu_nozzle_temp(lua_State* L) {
-    lua_pushnumber(L, (lua_Number)displayedPrinter().state.nozzleTemp);
-    return 1;
-}
-
+    lua_pushnumber(L, (lua_Number)displayedPrinter().state.nozzleTemp); return 1; }
 static int bambu_bed_temp(lua_State* L) {
-    lua_pushnumber(L, (lua_Number)displayedPrinter().state.bedTemp);
-    return 1;
-}
-
+    lua_pushnumber(L, (lua_Number)displayedPrinter().state.bedTemp); return 1; }
+static int bambu_chamber_temp(lua_State* L) {
+    lua_pushnumber(L, (lua_Number)displayedPrinter().state.chamberTemp); return 1; }
 static int bambu_nozzle_target(lua_State* L) {
-    lua_pushnumber(L, (lua_Number)displayedPrinter().state.nozzleTarget);
-    return 1;
-}
-
+    lua_pushnumber(L, (lua_Number)displayedPrinter().state.nozzleTarget); return 1; }
 static int bambu_bed_target(lua_State* L) {
-    lua_pushnumber(L, (lua_Number)displayedPrinter().state.bedTarget);
-    return 1;
-}
-
+    lua_pushnumber(L, (lua_Number)displayedPrinter().state.bedTarget); return 1; }
 static int bambu_remaining_mins(lua_State* L) {
-    lua_pushinteger(L, (long long)displayedPrinter().state.remainingMinutes);
-    return 1;
-}
-
+    lua_pushinteger(L, displayedPrinter().state.remainingMinutes); return 1; }
+static int bambu_layer(lua_State* L) {
+    lua_pushinteger(L, displayedPrinter().state.layerNum); return 1; }
+static int bambu_total_layers(lua_State* L) {
+    lua_pushinteger(L, displayedPrinter().state.totalLayers); return 1; }
+static int bambu_job_name(lua_State* L) {
+    lua_pushstring(L, displayedPrinter().state.subtaskName); return 1; }
+static int bambu_speed(lua_State* L) {
+    lua_pushinteger(L, displayedPrinter().state.speedLevel); return 1; }
 static int bambu_fan_part(lua_State* L) {
-    lua_pushinteger(L, (long long)displayedPrinter().state.coolingFanPct);
-    return 1;
-}
-
+    lua_pushinteger(L, displayedPrinter().state.coolingFanPct); return 1; }
 static int bambu_fan_aux(lua_State* L) {
-    lua_pushinteger(L, (long long)displayedPrinter().state.auxFanPct);
-    return 1;
-}
-
+    lua_pushinteger(L, displayedPrinter().state.auxFanPct); return 1; }
+static int bambu_fan_chamber(lua_State* L) {
+    lua_pushinteger(L, displayedPrinter().state.chamberFanPct); return 1; }
 static int bambu_printer_name(lua_State* L) {
-    lua_pushstring(L, displayedPrinter().config.name);
-    return 1;
-}
-
+    lua_pushstring(L, displayedPrinter().config.name); return 1; }
 static int bambu_connected(lua_State* L) {
-    lua_pushboolean(L, displayedPrinter().state.connected ? 1 : 0);
+    lua_pushboolean(L, displayedPrinter().state.connected ? 1 : 0); return 1; }
+static int bambu_printing(lua_State* L) {
+    lua_pushboolean(L, displayedPrinter().state.printing ? 1 : 0); return 1; }
+
+// bambu.ams_color(tray_index) → RGB565 int, or 0 if not present
+static int bambu_ams_color(lua_State* L) {
+    int idx = (int)luaL_checkinteger(L, 1);
+    const AmsState& ams = displayedPrinter().state.ams;
+    if (idx >= 0 && idx < AMS_MAX_TRAYS && ams.trays[idx].present)
+        lua_pushinteger(L, ams.trays[idx].colorRgb565);
+    else
+        lua_pushinteger(L, 0);
     return 1;
 }
 
-static int bambu_printing(lua_State* L) {
-    lua_pushboolean(L, displayedPrinter().state.printing ? 1 : 0);
+// bambu.ams_type(tray_index) → string
+static int bambu_ams_type(lua_State* L) {
+    int idx = (int)luaL_checkinteger(L, 1);
+    const AmsState& ams = displayedPrinter().state.ams;
+    if (idx >= 0 && idx < AMS_MAX_TRAYS && ams.trays[idx].present)
+        lua_pushstring(L, ams.trays[idx].type);
+    else
+        lua_pushstring(L, "");
+    return 1;
+}
+
+// bambu.ams_active() → tray index (0-15) or -1
+static int bambu_ams_active(lua_State* L) {
+    uint8_t t = displayedPrinter().state.ams.activeTray;
+    lua_pushinteger(L, (t == 255) ? -1 : (long long)t);
     return 1;
 }
 
@@ -153,26 +164,32 @@ static const luaL_Reg bambu_lib[] = {
     { "progress",       bambu_progress       },
     { "nozzle_temp",    bambu_nozzle_temp    },
     { "bed_temp",       bambu_bed_temp       },
+    { "chamber_temp",   bambu_chamber_temp   },
     { "nozzle_target",  bambu_nozzle_target  },
     { "bed_target",     bambu_bed_target     },
     { "remaining_mins", bambu_remaining_mins },
+    { "layer",          bambu_layer          },
+    { "total_layers",   bambu_total_layers   },
+    { "job_name",       bambu_job_name       },
+    { "speed",          bambu_speed          },
     { "fan_part",       bambu_fan_part       },
     { "fan_aux",        bambu_fan_aux        },
+    { "fan_chamber",    bambu_fan_chamber    },
     { "printer_name",   bambu_printer_name   },
     { "connected",      bambu_connected      },
     { "printing",       bambu_printing       },
+    { "ams_color",      bambu_ams_color      },
+    { "ams_type",       bambu_ams_type       },
+    { "ams_active",     bambu_ams_active     },
     { nullptr,          nullptr              }
 };
 
 // ===========================================================================
-//  sys.* module
+//  sys.* — system utilities
 // ===========================================================================
 
 static int sys_millis(lua_State* L) {
-    unsigned long ms = millis();
-    lua_pushinteger(L, (long long)ms);
-    return 1;
-}
+    lua_pushinteger(L, (long long)millis()); return 1; }
 
 static int sys_beep(lua_State* L) {
     (void)luaL_optnumber(L, 1, 1000.0);
@@ -182,19 +199,75 @@ static int sys_beep(lua_State* L) {
 }
 
 static int sys_log(lua_State* L) {
-    const char* msg = luaL_checkstring(L, 1);
-    Serial.println(msg);
-    return 0;
-}
+    Serial.println(luaL_checkstring(L, 1)); return 0; }
 
 static int sys_exit(lua_State* L) {
-    (void)L;
-    g_exit_requested = true;
+    (void)L; g_exit_requested = true; return 0; }
+
+static int sys_sdk_version(lua_State* L) {
+    lua_pushinteger(L, SDK_VERSION); return 1; }
+
+// sys.on_tick(fn) — register tick callback; fn(dt_ms) called each frame
+static int sys_on_tick(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    if (g_tick_ref != LUA_NOREF)
+        luaL_unref(L, LUA_REGISTRYINDEX, g_tick_ref);
+    lua_pushvalue(L, 1);
+    g_tick_ref = luaL_ref(L, LUA_REGISTRYINDEX);
     return 0;
 }
 
-static int sys_sdk_version(lua_State* L) {
-    lua_pushinteger(L, SDK_VERSION);
+// sys.http_get(url [, timeout_ms]) → body string or nil, err_string
+static int sys_http_get(lua_State* L) {
+    const char* url = luaL_checkstring(L, 1);
+    int timeout = (int)luaL_optinteger(L, 2, 8000);
+    HTTPClient http;
+    http.begin(url);
+    http.setTimeout(timeout);
+    int code = http.GET();
+    if (code == 200) {
+        String body = http.getString();
+        http.end();
+        lua_pushlstring(L, body.c_str(), body.length());
+        return 1;
+    }
+    http.end();
+    lua_pushnil(L);
+    char errbuf[24];
+    snprintf(errbuf, sizeof(errbuf), "HTTP %d", code);
+    lua_pushstring(L, errbuf);
+    return 2;
+}
+
+// sys.store_set(key, value)  — persist string under /appdata/{key}
+static int sys_store_set(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    const char* val = luaL_checkstring(L, 2);
+    char path[48];
+    snprintf(path, sizeof(path), "/appdata/%s", key);
+    // ensure dir
+    if (!LittleFS.exists("/appdata"))
+        LittleFS.mkdir("/appdata");
+    File f = LittleFS.open(path, "w");
+    if (f) { f.print(val); f.close(); }
+    return 0;
+}
+
+// sys.store_get(key [, default]) → string
+static int sys_store_get(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    const char* def = luaL_optstring(L, 2, "");
+    char path[48];
+    snprintf(path, sizeof(path), "/appdata/%s", key);
+    if (!LittleFS.exists(path)) {
+        lua_pushstring(L, def);
+        return 1;
+    }
+    File f = LittleFS.open(path, "r");
+    if (!f) { lua_pushstring(L, def); return 1; }
+    String v = f.readString();
+    f.close();
+    lua_pushlstring(L, v.c_str(), v.length());
     return 1;
 }
 
@@ -204,27 +277,15 @@ static const luaL_Reg sys_lib[] = {
     { "log",         sys_log         },
     { "exit",        sys_exit        },
     { "sdk_version", sys_sdk_version },
+    { "on_tick",     sys_on_tick     },
+    { "http_get",    sys_http_get    },
+    { "store_set",   sys_store_set   },
+    { "store_get",   sys_store_get   },
     { nullptr,       nullptr         }
 };
 
 // ===========================================================================
-//  ui.* module — LVGL 8 implementation
-//
-//  ui.screen()                   → lightuserdata (lv_obj_t*)
-//  ui.label(scr, text, opts)     → nil
-//  ui.arc(scr, opts)             → nil
-//  ui.rect(scr, opts)            → nil
-//  ui.show(scr)                  → nil
-//
-//  opts table keys:
-//    align  string  "center", "top_mid", etc.
-//    x, y   int     offset from align anchor
-//    color  int     RGB565
-//    font   int     point size (14/16/20/28)
-//    cx,cy  int     center pixel (arc/rect)
-//    size   int     arc radius
-//    value  int     arc 0-100 percent
-//    w, h   int     rect width/height
+//  ui.* — LVGL widgets, all returning handles for live updates
 // ===========================================================================
 
 static int ui_screen(lua_State* L) {
@@ -237,6 +298,7 @@ static int ui_screen(lua_State* L) {
     return 1;
 }
 
+// ui.label(parent, text, opts) → handle
 static int ui_label(lua_State* L) {
     lv_obj_t* parent = (lv_obj_t*)lua_touserdata(L, 1);
     const char* text = luaL_checkstring(L, 2);
@@ -246,87 +308,281 @@ static int ui_label(lua_State* L) {
     lv_label_set_text(lbl, text);
 
     if (lua_istable(L, 3)) {
-        uint16_t color = (uint16_t)tbl_int(L, 3, "color", CLR_TEXT);
-        int      font  = (int)     tbl_int(L, 3, "font",  16);
+        uint16_t    color   = (uint16_t)tbl_int(L, 3, "color", CLR_TEXT);
+        int         font    = (int)     tbl_int(L, 3, "font",  16);
         const char* align_s = tbl_str(L, 3, "align", nullptr);
-        int      ox    = (int)     tbl_int(L, 3, "x", 0);
-        int      oy    = (int)     tbl_int(L, 3, "y", 0);
+        int         ox      = (int)     tbl_int(L, 3, "x", 0);
+        int         oy      = (int)     tbl_int(L, 3, "y", 0);
+        int         w       = (int)     tbl_int(L, 3, "w", 0);
 
         lv_obj_set_style_text_color(lbl, c565(color), LV_PART_MAIN);
         lv_obj_set_style_text_font(lbl, font_by_size(font), LV_PART_MAIN);
 
-        if (align_s) {
-            lv_obj_align(lbl, parse_align(align_s), ox, oy);
-        } else {
-            lv_obj_set_pos(lbl, ox, oy);
+        if (w > 0) {
+            lv_obj_set_width(lbl, w);
+            lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
         }
+        if (align_s) lv_obj_align(lbl, parse_align(align_s), ox, oy);
+        else         lv_obj_set_pos(lbl, ox, oy);
     }
+    lua_pushlightuserdata(L, lbl);
+    return 1;
+}
+
+// ui.label_set(handle, text) — update label text
+static int ui_label_set(lua_State* L) {
+    lv_obj_t* lbl = (lv_obj_t*)lua_touserdata(L, 1);
+    const char* text = luaL_checkstring(L, 2);
+    if (lbl) lv_label_set_text(lbl, text);
     return 0;
 }
 
+// ui.label_color(handle, rgb565)
+static int ui_label_color(lua_State* L) {
+    lv_obj_t* lbl  = (lv_obj_t*)lua_touserdata(L, 1);
+    uint16_t color = (uint16_t)luaL_checkinteger(L, 2);
+    if (lbl) lv_obj_set_style_text_color(lbl, c565(color), LV_PART_MAIN);
+    return 0;
+}
+
+// ui.arc(parent, opts) → handle
 static int ui_arc(lua_State* L) {
     lv_obj_t* parent = (lv_obj_t*)lua_touserdata(L, 1);
     if (!parent || !lua_istable(L, 2)) return 0;
 
-    int     value  = (int)tbl_int(L, 2, "value", 0);
-    int     size   = (int)tbl_int(L, 2, "size",  80);
-    uint16_t color = (uint16_t)tbl_int(L, 2, "color", CLR_GREEN);
-    int     cx     = (int)tbl_int(L, 2, "cx", 120);
-    int     cy     = (int)tbl_int(L, 2, "cy", 120);
+    int      value  = (int)     tbl_int(L, 2, "value",  0);
+    int      size   = (int)     tbl_int(L, 2, "size",   80);
+    uint16_t color  = (uint16_t)tbl_int(L, 2, "color",  CLR_GREEN);
+    uint16_t track  = (uint16_t)tbl_int(L, 2, "track",  CLR_TRACK);
+    int      cx     = (int)     tbl_int(L, 2, "cx",     120);
+    int      cy     = (int)     tbl_int(L, 2, "cy",     120);
+    int      width  = (int)     tbl_int(L, 2, "width",  8);
+    int      start_a= (int)     tbl_int(L, 2, "start",  135);
+    int      sweep  = (int)     tbl_int(L, 2, "sweep",  270);
 
     lv_obj_t* arc = lv_arc_create(parent);
     lv_obj_set_size(arc, size * 2, size * 2);
-    // Horseshoe: 135° to 45° (going clockwise, 270° sweep)
-    lv_arc_set_bg_angles(arc, 135, 45);
-    lv_arc_set_angles(arc, 135, 135 + (int)(270 * value / 100));
+    int end_a = start_a + sweep;
+    lv_arc_set_bg_angles(arc, start_a, end_a % 360);
+    lv_arc_set_angles(arc, start_a, start_a + (int)((long long)sweep * value / 100));
     lv_arc_set_value(arc, value);
 
     lv_obj_set_style_arc_color(arc, c565(color), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(arc, c565(CLR_TRACK), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, c565(track),  LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, width, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, width, LV_PART_INDICATOR);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-
     lv_obj_set_pos(arc, cx - size, cy - size);
+    lua_pushlightuserdata(L, arc);
+    return 1;
+}
+
+// ui.arc_set(handle, value 0-100)
+static int ui_arc_set(lua_State* L) {
+    lv_obj_t* arc  = (lv_obj_t*)lua_touserdata(L, 1);
+    int       val  = (int)luaL_checkinteger(L, 2);
+    if (!arc) return 0;
+    // Read back sweep from existing bg angles
+    lv_arc_set_value(arc, val);
     return 0;
 }
 
+// ui.arc_color(handle, rgb565)
+static int ui_arc_color(lua_State* L) {
+    lv_obj_t* arc  = (lv_obj_t*)lua_touserdata(L, 1);
+    uint16_t color = (uint16_t)luaL_checkinteger(L, 2);
+    if (arc) lv_obj_set_style_arc_color(arc, c565(color), LV_PART_INDICATOR);
+    return 0;
+}
+
+// ui.rect(parent, opts) → handle
 static int ui_rect(lua_State* L) {
     lv_obj_t* parent = (lv_obj_t*)lua_touserdata(L, 1);
     if (!parent || !lua_istable(L, 2)) return 0;
 
-    int      cx    = (int)    tbl_int(L, 2, "cx",    120);
-    int      cy    = (int)    tbl_int(L, 2, "cy",    120);
-    int      w     = (int)    tbl_int(L, 2, "w",      40);
-    int      h     = (int)    tbl_int(L, 2, "h",      40);
+    int      cx    = (int)     tbl_int(L, 2, "cx",    120);
+    int      cy    = (int)     tbl_int(L, 2, "cy",    120);
+    int      w     = (int)     tbl_int(L, 2, "w",      40);
+    int      h     = (int)     tbl_int(L, 2, "h",      40);
     uint16_t color = (uint16_t)tbl_int(L, 2, "color", CLR_BTN);
-    int      r     = (int)    tbl_int(L, 2, "radius",  0);
+    int      r     = (int)     tbl_int(L, 2, "radius", 0);
+    bool     border= tbl_bool(L, 2, "border", false);
+    uint16_t bcol  = (uint16_t)tbl_int(L, 2, "border_color", CLR_TEXT_DARK);
 
     lv_obj_t* obj = lv_obj_create(parent);
     lv_obj_set_size(obj, w, h);
     lv_obj_set_pos(obj, cx - w / 2, cy - h / 2);
     lv_obj_set_style_bg_color(obj, c565(color), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(obj, border ? 1 : 0, LV_PART_MAIN);
+    if (border) lv_obj_set_style_border_color(obj, c565(bcol), LV_PART_MAIN);
     lv_obj_set_style_radius(obj, r, LV_PART_MAIN);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
+    lua_pushlightuserdata(L, obj);
+    return 1;
+}
+
+// ui.rect_set(handle, color)
+static int ui_rect_set(lua_State* L) {
+    lv_obj_t* obj  = (lv_obj_t*)lua_touserdata(L, 1);
+    uint16_t color = (uint16_t)luaL_checkinteger(L, 2);
+    if (obj) lv_obj_set_style_bg_color(obj, c565(color), LV_PART_MAIN);
     return 0;
 }
 
+// ui.rect_size(handle, w, h)
+static int ui_rect_size(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    int w = (int)luaL_checkinteger(L, 2);
+    int h = (int)luaL_checkinteger(L, 3);
+    if (obj) lv_obj_set_size(obj, w, h);
+    return 0;
+}
+
+// Opa wrapper — lv_obj_set_style_opa needs a selector arg, unusable directly as anim cb
+static void _set_opa(lv_obj_t* obj, int32_t v) {
+    lv_obj_set_style_opa(obj, (lv_opa_t)v, LV_PART_MAIN);
+}
+
+// ui.animate(handle, opts)
+// opts: prop="opa"|"x"|"y"|"w"|"h"  from=  to=  time=  delay=  repeat=  bounce=
+static int ui_animate(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!obj || !lua_istable(L, 2)) return 0;
+
+    const char* prop  = tbl_str(L, 2, "prop",   "opa");
+    int from          = (int)tbl_int(L, 2, "from",   0);
+    int to            = (int)tbl_int(L, 2, "to",   255);
+    int time_ms       = (int)tbl_int(L, 2, "time", 1000);
+    int delay_ms      = (int)tbl_int(L, 2, "delay",  0);
+    bool rep          = tbl_bool(L, 2, "repeat", false);
+    bool bounce       = tbl_bool(L, 2, "bounce", false);
+
+    lv_anim_exec_xcb_t exec_cb = nullptr;
+    if      (strcmp(prop, "opa") == 0) exec_cb = (lv_anim_exec_xcb_t)_set_opa;
+    else if (strcmp(prop, "x")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_x;
+    else if (strcmp(prop, "y")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_y;
+    else if (strcmp(prop, "w")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_width;
+    else if (strcmp(prop, "h")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_height;
+    if (!exec_cb) return 0;
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, obj);
+    lv_anim_set_exec_cb(&a, exec_cb);
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_time(&a, time_ms);
+    lv_anim_set_delay(&a, delay_ms);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    if (bounce) lv_anim_set_playback_time(&a, time_ms);
+    if (rep)    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+    return 0;
+}
+
+// ui.canvas(parent, w, h) → handle  (draws into PSRAM buffer)
+static int ui_canvas(lua_State* L) {
+    lv_obj_t* parent = (lv_obj_t*)lua_touserdata(L, 1);
+    int w = (int)luaL_checkinteger(L, 2);
+    int h = (int)luaL_checkinteger(L, 3);
+    if (!parent || w <= 0 || h <= 0) return 0;
+
+    size_t buf_size = LV_CANVAS_BUF_SIZE_TRUE_COLOR(w, h);
+    void* buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!buf) { lua_pushnil(L); return 1; }
+
+    lv_obj_t* canvas = lv_canvas_create(parent);
+    lv_canvas_set_buffer(canvas, buf, w, h, LV_IMG_CF_TRUE_COLOR);
+    lv_canvas_fill_bg(canvas, c565(CLR_BG), LV_OPA_COVER);
+    lua_pushlightuserdata(L, canvas);
+    return 1;
+}
+
+// ui.canvas_line(canvas, x1,y1, x2,y2, color)
+static int ui_canvas_line(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!canvas) return 0;
+    lv_point_t pts[2];
+    pts[0].x = (lv_coord_t)luaL_checkinteger(L, 2);
+    pts[0].y = (lv_coord_t)luaL_checkinteger(L, 3);
+    pts[1].x = (lv_coord_t)luaL_checkinteger(L, 4);
+    pts[1].y = (lv_coord_t)luaL_checkinteger(L, 5);
+    uint16_t color = (uint16_t)luaL_optinteger(L, 6, CLR_TEXT);
+
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color = c565(color);
+    dsc.width = 1;
+    lv_canvas_draw_line(canvas, pts, 2, &dsc);
+    return 0;
+}
+
+// ui.canvas_rect(canvas, x, y, w, h, color [, radius])
+static int ui_canvas_rect(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!canvas) return 0;
+    lv_area_t area;
+    area.x1 = (lv_coord_t)luaL_checkinteger(L, 2);
+    area.y1 = (lv_coord_t)luaL_checkinteger(L, 3);
+    int w    = (int)luaL_checkinteger(L, 4);
+    int h    = (int)luaL_checkinteger(L, 5);
+    area.x2  = area.x1 + w - 1;
+    area.y2  = area.y1 + h - 1;
+    uint16_t color = (uint16_t)luaL_optinteger(L, 6, CLR_BTN);
+    int radius     = (int)luaL_optinteger(L, 7, 0);
+
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.bg_color  = c565(color);
+    dsc.bg_opa    = LV_OPA_COVER;
+    dsc.radius    = radius;
+    dsc.border_width = 0;
+    lv_canvas_draw_rect(canvas, area.x1, area.y1, w, h, &dsc);
+    return 0;
+}
+
+// ui.canvas_clear(canvas, color)
+static int ui_canvas_clear(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    uint16_t color = (uint16_t)luaL_optinteger(L, 2, CLR_BG);
+    if (canvas) lv_canvas_fill_bg(canvas, c565(color), LV_OPA_COVER);
+    return 0;
+}
+
+// ui.show(screen)
 static int ui_show(lua_State* L) {
     lv_obj_t* scr = (lv_obj_t*)lua_touserdata(L, 1);
     if (scr) lv_scr_load(scr);
     return 0;
 }
 
+// ui.obj_delete(handle) — clean up a widget
+static int ui_obj_delete(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    if (obj) lv_obj_del(obj);
+    return 0;
+}
+
 static const luaL_Reg ui_lib[] = {
-    { "screen", ui_screen },
-    { "label",  ui_label  },
-    { "arc",    ui_arc    },
-    { "rect",   ui_rect   },
-    { "show",   ui_show   },
-    { nullptr,  nullptr   }
+    { "screen",       ui_screen      },
+    { "label",        ui_label       },
+    { "label_set",    ui_label_set   },
+    { "label_color",  ui_label_color },
+    { "arc",          ui_arc         },
+    { "arc_set",      ui_arc_set     },
+    { "arc_color",    ui_arc_color   },
+    { "rect",         ui_rect        },
+    { "rect_set",     ui_rect_set    },
+    { "rect_size",    ui_rect_size   },
+    { "animate",      ui_animate     },
+    { "canvas",       ui_canvas      },
+    { "canvas_line",  ui_canvas_line },
+    { "canvas_rect",  ui_canvas_rect },
+    { "canvas_clear", ui_canvas_clear},
+    { "show",         ui_show        },
+    { "delete",       ui_obj_delete  },
+    { nullptr,        nullptr        }
 };
 
 // ===========================================================================
@@ -335,15 +591,11 @@ static const luaL_Reg ui_lib[] = {
 
 void sdkApiRegister(lua_State* L) {
     g_exit_requested = false;
+    g_tick_ref       = LUA_NOREF;
 
-    luaL_newlib(L, bambu_lib);
-    lua_setglobal(L, "bambu");
-
-    luaL_newlib(L, sys_lib);
-    lua_setglobal(L, "sys");
-
-    luaL_newlib(L, ui_lib);
-    lua_setglobal(L, "ui");
+    luaL_newlib(L, bambu_lib);  lua_setglobal(L, "bambu");
+    luaL_newlib(L, sys_lib);    lua_setglobal(L, "sys");
+    luaL_newlib(L, ui_lib);     lua_setglobal(L, "ui");
 }
 
 #endif // LUA_AVAILABLE

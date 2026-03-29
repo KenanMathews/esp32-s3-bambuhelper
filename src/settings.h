@@ -67,6 +67,7 @@ struct BuzzerSettings {
 extern char wifiSSID[33];
 extern char wifiPass[65];
 extern uint8_t brightness;
+extern char storeUrl[256];   // URL to app store index.json
 extern DisplaySettings dispSettings;
 extern NetworkSettings netSettings;
 extern DisplayPowerSettings dpSettings;

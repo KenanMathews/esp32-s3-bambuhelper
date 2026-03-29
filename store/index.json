@@ -3,6 +3,39 @@
   "updated": "2026-03-29",
   "apps": [
     {
+      "id": "mission-control",
+      "name": "Mission Control",
+      "description": "Watch face with progress arcs, temps, ETA, and end-of-print report",
+      "author": "BambuHelper",
+      "category": "monitor",
+      "version": "1.0",
+      "sdk_min": 2,
+      "color": 2086,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/mission-control.lua"
+    },
+    {
+      "id": "layer-timeline",
+      "name": "Layer Timeline",
+      "description": "Bar chart of print speed per layer segment. Reveals slowdowns and layer shifts.",
+      "author": "BambuHelper",
+      "category": "monitor",
+      "version": "1.0",
+      "sdk_min": 2,
+      "color": 552,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/layer-timeline.lua"
+    },
+    {
+      "id": "print-report",
+      "name": "Print Report",
+      "description": "Shows the last completed print report: job name, duration, layers, temps.",
+      "author": "BambuHelper",
+      "category": "monitor",
+      "version": "1.0",
+      "sdk_min": 2,
+      "color": 552,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/print-report.lua"
+    },
+    {
       "id": "basic-status",
       "name": "Basic Status",
       "description": "Progress arc, nozzle & bed temps",

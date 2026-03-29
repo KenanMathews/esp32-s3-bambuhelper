@@ -1,6 +1,9 @@
 /*
  * display_ui.cpp — LVGL screen state machine
  *
+ * Board:  Waveshare ESP32-S3-Touch-LCD-1.28
+ *         GC9A01A 240×240 round, SPI2 @ 40MHz | CST816S touch, I2C 0x15
+ *
  * Owns the TFT_eSPI instance (used only by lvgl_port.cpp for SPI flushing).
  * All visible rendering is done through LVGL screens managed by:
  *   screen_boot.cpp     — splash, AP mode, connecting, WiFi connected, off

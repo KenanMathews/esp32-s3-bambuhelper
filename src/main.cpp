@@ -197,6 +197,21 @@ void loop() {
     return;                   // do NOT call updateDisplay() for launcher
   }
 
+  // ── App (Lua) tick loop — pump the running script each frame ────────────
+  if (getScreenState() == SCREEN_APP) {
+    if (luaRuntimeRunning()) {
+      if (!luaRuntimeTick()) {
+        // App finished or called sys.exit() — return to previous screen
+        setScreenState(prelaunchScreen == SCREEN_APP ? SCREEN_IDLE : prelaunchScreen);
+      }
+    }
+    if (isWiFiConnected() && !isAPMode() && bambuClient.isAnyConfigured()) {
+      bambuClient.loop();
+    }
+    buzzerTick();
+    return;
+  }
+
   // ── Printer list active — handle entirely here ───────────────────────────
   if (getScreenState() == SCREEN_PRINTER_LIST) {
     int8_t sel = printerListUpdate();

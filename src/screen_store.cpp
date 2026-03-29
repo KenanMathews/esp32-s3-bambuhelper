@@ -2,6 +2,7 @@
 #include "app_manager.h"
 #include "lvgl_port.h"
 #include "wifi_manager.h"
+#include "settings.h"
 #include "config.h"
 #include <Arduino.h>
 #include <lvgl.h>
@@ -25,7 +26,7 @@ static inline lv_color_t c565(uint16_t rgb565) {
 #define STORE_MAX_APPS    12
 #define ROW_H             46    // taller row to fit name + description
 #define LIST_Y_START      56    // below title (y=10,h=24) + status (y=36,h=18) + gap
-#define STORE_SOURCE_URL  "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/index.json"
+#define STORE_DEFAULT_URL "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/index.json"
 
 // ---------------------------------------------------------------------------
 //  State
@@ -290,8 +291,9 @@ static void doFetch() {
     setStatus("Fetching...", CLR_YELLOW);
     lvglPortTick();
 
+    const char* url = (storeUrl[0] != '\0') ? storeUrl : STORE_DEFAULT_URL;
     HTTPClient http;
-    http.begin(STORE_SOURCE_URL);
+    http.begin(url);
     http.setTimeout(8000);
     int code = http.GET();
     if (code == 200) {
