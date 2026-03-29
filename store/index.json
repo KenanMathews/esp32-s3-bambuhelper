@@ -34,39 +34,6 @@
       "sdk_min": 2,
       "color": 552,
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/print-report.lua"
-    },
-    {
-      "id": "basic-status",
-      "name": "Basic Status",
-      "description": "Progress arc, nozzle & bed temps",
-      "author": "BambuHelper",
-      "category": "display",
-      "version": "1.0",
-      "sdk_min": 1,
-      "color": 2016,
-      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/basic-app/app.lua"
-    },
-    {
-      "id": "minimal-clock",
-      "name": "Minimal Clock",
-      "description": "Large time + date, no printer data",
-      "author": "BambuHelper",
-      "category": "clock",
-      "version": "1.0",
-      "sdk_min": 1,
-      "color": 63488,
-      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/minimal-clock/app.lua"
-    },
-    {
-      "id": "fan-monitor",
-      "name": "Fan Monitor",
-      "description": "Three fan speeds on one screen",
-      "author": "BambuHelper",
-      "category": "display",
-      "version": "1.0",
-      "sdk_min": 1,
-      "color": 1055,
-      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/fan-monitor/app.lua"
     }
   ]
 }
