@@ -23,8 +23,8 @@ static inline lv_color_t c565(uint16_t rgb565) {
 //  Constants
 // ---------------------------------------------------------------------------
 #define STORE_MAX_APPS    12
-#define ROW_H             38
-#define LIST_Y_START      44
+#define ROW_H             46    // taller row to fit name + description
+#define LIST_Y_START      56    // below title (y=10,h=24) + status (y=36,h=18) + gap
 #define STORE_SOURCE_URL  "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/index.json"
 
 // ---------------------------------------------------------------------------
@@ -41,6 +41,9 @@ enum StorePhase : uint8_t {
 struct StoreEntry {
     char     id[APP_ID_LEN];
     char     name[APP_NAME_LEN];
+    char     description[64];
+    char     author[32];
+    char     category[16];
     char     script_url[128];
     char     version[12];
     uint8_t  sdk_min;
@@ -89,16 +92,16 @@ static void buildShell() {
     lv_obj_set_style_pad_all(g_screen, 0, LV_PART_MAIN);
 
     lv_obj_t* title = lv_label_create(g_screen);
-    lv_label_set_text(title, "Store");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_label_set_text(title, "App Store");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, c565(CLR_TEXT), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
 
     g_status_lbl = lv_label_create(g_screen);
     lv_label_set_text(g_status_lbl, "");
     lv_obj_set_style_text_font(g_status_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(g_status_lbl, c565(CLR_TEXT_DIM), LV_PART_MAIN);
-    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 36);
 
     g_list = nullptr;
 }
@@ -163,7 +166,7 @@ static void buildList() {
     if (g_list) { lv_obj_del(g_list); g_list = nullptr; }
 
     g_list = lv_obj_create(g_screen);
-    lv_obj_set_size(g_list, 220, 170);
+    lv_obj_set_size(g_list, 232, 240 - LIST_Y_START - 4);
     lv_obj_align(g_list, LV_ALIGN_TOP_MID, 0, LIST_Y_START);
     lv_obj_set_style_bg_color(g_list, c565(CLR_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(g_list, LV_OPA_COVER, LV_PART_MAIN);
@@ -194,23 +197,32 @@ static void buildList() {
         lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
         lv_obj_set_style_radius(dot, 4, LV_PART_MAIN);
 
-        // App name
+        // App name (top line)
         lv_obj_t* name_lbl = lv_label_create(row);
         lv_label_set_text(name_lbl, entry.name);
         lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(name_lbl, c565(CLR_TEXT), LV_PART_MAIN);
-        lv_obj_set_pos(name_lbl, 20, (ROW_H - 14) / 2 - 1);
+        lv_obj_set_pos(name_lbl, 20, 4);
 
-        // Version
+        // Description (bottom line)
+        lv_obj_t* desc_lbl = lv_label_create(row);
+        lv_label_set_text(desc_lbl, entry.description[0] ? entry.description : entry.category);
+        lv_obj_set_style_text_font(desc_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(desc_lbl, c565(CLR_TEXT_DIM), LV_PART_MAIN);
+        lv_obj_set_pos(desc_lbl, 20, 22);
+        lv_obj_set_width(desc_lbl, 120);
+        lv_label_set_long_mode(desc_lbl, LV_LABEL_LONG_CLIP);
+
+        // Version (top-right)
         lv_obj_t* ver_lbl = lv_label_create(row);
         lv_label_set_text(ver_lbl, entry.version);
         lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(ver_lbl, c565(CLR_TEXT_DARK), LV_PART_MAIN);
-        lv_obj_align(ver_lbl, LV_ALIGN_RIGHT_MID, -50, 0);
+        lv_obj_align(ver_lbl, LV_ALIGN_RIGHT_MID, -50, -8);
 
         // Action button
         lv_obj_t* btn = lv_btn_create(row);
-        lv_obj_set_size(btn, 42, 22);
+        lv_obj_set_size(btn, 44, 26);
         lv_obj_align(btn, LV_ALIGN_RIGHT_MID, -2, 0);
         lv_obj_set_style_radius(btn, 4, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 0, LV_PART_MAIN);
@@ -257,10 +269,13 @@ static void parseIndex(const String& json) {
     for (JsonObject app : apps) {
         if (g_entry_count >= STORE_MAX_APPS) break;
         StoreEntry& ent = g_entries[g_entry_count];
-        strlcpy(ent.id,         app["id"]         | "", sizeof(ent.id));
-        strlcpy(ent.name,       app["name"]       | "", sizeof(ent.name));
-        strlcpy(ent.script_url, app["script_url"] | "", sizeof(ent.script_url));
-        strlcpy(ent.version,    app["version"]    | "?", sizeof(ent.version));
+        strlcpy(ent.id,          app["id"]          | "", sizeof(ent.id));
+        strlcpy(ent.name,        app["name"]        | "", sizeof(ent.name));
+        strlcpy(ent.description, app["description"] | "", sizeof(ent.description));
+        strlcpy(ent.author,      app["author"]      | "", sizeof(ent.author));
+        strlcpy(ent.category,    app["category"]    | "", sizeof(ent.category));
+        strlcpy(ent.script_url,  app["script_url"]  | "", sizeof(ent.script_url));
+        strlcpy(ent.version,     app["version"]     | "?", sizeof(ent.version));
         ent.sdk_min   = app["sdk_min"]  | 1;
         ent.color     = (uint16_t)(app["color"].as<unsigned int>());
         ent.installed = isInstalled(ent.id);

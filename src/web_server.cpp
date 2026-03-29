@@ -840,7 +840,7 @@ function startOta(){
   if(!f){showToast('Select a .bin file first');return;}
   if(!f.name.endsWith('.bin')){showToast('File must be a .bin firmware file');return;}
   if(f.size<32768){showToast('File too small — not a valid firmware');return;}
-  if(f.size>1310720){showToast('File too large (max 1.25 MB)');return;}
+  if(f.size>3145728){showToast('File too large (max 3 MB)');return;}
   if(!confirm('Flash this firmware? Device will restart. All settings are preserved.')) return;
   var stat=document.getElementById('otaStatus');
   var prog=document.getElementById('otaProgress');

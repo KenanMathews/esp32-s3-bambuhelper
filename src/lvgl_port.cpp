@@ -1,5 +1,6 @@
 #include "lvgl_port.h"
 #include "button.h"       // for getTouchXY()
+#include "settings.h"     // for dispSettings.rotation
 #include <TFT_eSPI.h>
 
 // TFT_eSPI instance is owned by display_ui.cpp; only used here for SPI flushing.
@@ -32,9 +33,17 @@ static void disp_flush(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* co
 static void touch_read(lv_indev_drv_t* drv, lv_indev_data_t* data) {
   int16_t x = 0, y = 0;
   if (getTouchXY(&x, &y)) {
+    // Transform raw touch coordinates to match TFT rotation (240×240 display)
+    int16_t tx = x, ty = y;
+    switch (dispSettings.rotation) {
+      case 1: tx = y;       ty = 239 - x; break;
+      case 2: tx = 239 - x; ty = 239 - y; break;
+      case 3: tx = 239 - y; ty = x;       break;
+      default: break;  // rotation 0: no transform
+    }
     data->state   = LV_INDEV_STATE_PR;
-    data->point.x = x;
-    data->point.y = y;
+    data->point.x = tx;
+    data->point.y = ty;
   } else {
     data->state = LV_INDEV_STATE_REL;
   }

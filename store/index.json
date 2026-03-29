@@ -1,17 +1,39 @@
 {
-  "version": 1,
+  "version": 2,
   "updated": "2026-03-29",
   "apps": [
     {
       "id": "basic-status",
       "name": "Basic Status",
-      "description": "Shows printer name, progress arc, nozzle and bed temps",
+      "description": "Progress arc, nozzle & bed temps",
+      "author": "BambuHelper",
+      "category": "display",
       "version": "1.0",
       "sdk_min": 1,
       "color": 2016,
-      "category": "display",
-      "author": "BambuHelper Team",
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/basic-app/app.lua"
+    },
+    {
+      "id": "minimal-clock",
+      "name": "Minimal Clock",
+      "description": "Large time + date, no printer data",
+      "author": "BambuHelper",
+      "category": "clock",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 63488,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/minimal-clock/app.lua"
+    },
+    {
+      "id": "fan-monitor",
+      "name": "Fan Monitor",
+      "description": "Three fan speeds on one screen",
+      "author": "BambuHelper",
+      "category": "display",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 1055,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/fan-monitor/app.lua"
     }
   ]
 }

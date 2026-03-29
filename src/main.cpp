@@ -90,9 +90,17 @@ static void handleRotation() {
 // ---------------------------------------------------------------------------
 static void handleLauncherSelection(int8_t sel) {
   switch (sel) {
-    case LAUNCHER_DASHBOARD:
-      setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+    case LAUNCHER_DASHBOARD: {
+      ScreenState dest = prelaunchScreen;
+      // Fall back to IDLE if prelaunchScreen is an overlay or unset
+      if (dest == SCREEN_LAUNCHER || dest == SCREEN_STORE  ||
+          dest == SCREEN_APP      || dest == SCREEN_INFO   ||
+          dest == SCREEN_PRINTER_LIST || dest == SCREEN_SPLASH) {
+        dest = SCREEN_IDLE;
+      }
+      setScreenState(dest);
       break;
+    }
 
     case LAUNCHER_CLOCK:
       setScreenState(SCREEN_CLOCK);
@@ -103,8 +111,7 @@ static void handleLauncherSelection(int8_t sel) {
       break;
 
     case LAUNCHER_SETTINGS:
-      // Show idle screen — configure via web UI over WiFi
-      setScreenState(SCREEN_IDLE);
+      setScreenState(SCREEN_INFO);
       break;
 
     default:
@@ -213,7 +220,13 @@ void loop() {
 
   // ── Button: long press → launcher (works regardless of WiFi state) ──────
   if (wasButtonLongPressed()) {
-    prelaunchScreen = getScreenState();
+    ScreenState cur = getScreenState();
+    // Only save printer/clock/off screens — never save overlay screens as restore target
+    if (cur != SCREEN_STORE && cur != SCREEN_APP &&
+        cur != SCREEN_INFO  && cur != SCREEN_LAUNCHER &&
+        cur != SCREEN_PRINTER_LIST) {
+      prelaunchScreen = cur;
+    }
     setScreenState(SCREEN_LAUNCHER);
     launcherEnter();
     buzzerTick();
@@ -254,6 +267,13 @@ void loop() {
     // ── Auto screen selection ───────────────────────────────────────────
     const BambuState& s = displayedPrinter().state;
     ScreenState current = getScreenState();
+
+    // Don't auto-navigate away from user-initiated overlay screens
+    if (current == SCREEN_STORE || current == SCREEN_APP ||
+        current == SCREEN_INFO  || current == SCREEN_LAUNCHER ||
+        current == SCREEN_PRINTER_LIST) {
+      goto skip_auto_screen;
+    }
 
     if (!bambuClient.isAnyConfigured()) {
       // No printer configured — stay on IDLE (web UI shows setup prompt)
@@ -332,6 +352,7 @@ void loop() {
         idleClockStart    = 0;
       }
     }
+    skip_auto_screen:;
   }
 
   // ── Idle / Connecting → Clock / Off auto-transition ──────────────────────

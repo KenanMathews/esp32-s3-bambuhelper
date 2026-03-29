@@ -16,8 +16,9 @@ enum ScreenState {
   SCREEN_OFF,
   SCREEN_LAUNCHER,      // long-press overlay menu
   SCREEN_PRINTER_LIST,  // printer-selection screen
-  SCREEN_STORE,         // app store placeholder
-  SCREEN_APP            // running Lua app
+  SCREEN_STORE,         // app store
+  SCREEN_APP,           // running Lua app
+  SCREEN_INFO           // device info / settings summary
 };
 
 // TFT_eSPI instance — used by lvgl_port.cpp for SPI flush.

@@ -26,6 +26,29 @@ String getAPSSID() {
   return apSSID;
 }
 
+static void startAP();  // forward declare
+void forceAPMode() {
+  WiFi.disconnect(true);
+  startAP();
+}
+
+void reconnectWiFi() {
+  if (dnsServer) {
+    dnsServer->stop();
+    delete dnsServer;
+    dnsServer = nullptr;
+  }
+  apMode = false;
+  disconnectTime = 0;
+  reconnectAttempts = 0;
+  lastReconnectAttempt = 0;
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(wifiSSID, wifiPass);
+  Serial.println("Leaving AP mode, reconnecting to WiFi...");
+  setScreenState(SCREEN_CONNECTING_WIFI);
+}
+
 static void startAP() {
   // Build SSID from MAC
   uint32_t mac = (uint32_t)(ESP.getEfuseMac() & 0xFFFF);

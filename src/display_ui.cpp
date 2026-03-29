@@ -20,6 +20,7 @@
 #include "screen_clock_text.h"
 #include "screen_store.h"
 #include "screen_app.h"
+#include "screen_info.h"
 #include "display_launcher.h"
 #include "lvgl_port.h"
 #include "config.h"
@@ -68,6 +69,8 @@ static lv_obj_t* screenObjFor(ScreenState state) {
             return storeScreenGet();
         case SCREEN_APP:
             return appScreenGet();
+        case SCREEN_INFO:
+            return infoScreenGet();
         case SCREEN_LAUNCHER:
             return nullptr;  // launcher manages its own screen
         default:
@@ -100,6 +103,7 @@ void initDisplay() {
     clockTextScreenInit();
     storeScreenInit();
     appScreenInit();
+    infoScreenInit();
 
     // Show splash immediately
     lv_scr_load(bootScreenGet(SCREEN_SPLASH));
@@ -152,6 +156,8 @@ void setScreenState(ScreenState state) {
     // Load LVGL screen (launcher and store manage their own lv_scr_load)
     if (state == SCREEN_STORE) {
         storeScreenEnter();  // handles lv_scr_load + HTTP fetch
+    } else if (state == SCREEN_INFO) {
+        infoScreenEnter();   // updates live data then loads screen
     } else if (state != SCREEN_LAUNCHER) {
         // For pong clock, clockTextScreenGet() returns a blank screen
         // that serves as the LVGL owner while pong draws over TFT_eSPI
@@ -253,6 +259,10 @@ void updateDisplay() {
 
         case SCREEN_STORE:
             storeScreenUpdate();
+            break;
+
+        case SCREEN_INFO:
+            infoScreenUpdate();
             break;
 
         default:
