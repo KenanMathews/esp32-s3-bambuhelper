@@ -199,6 +199,26 @@ void loop() {
 
   // ── App (Lua) tick loop — pump the running script each frame ────────────
   if (getScreenState() == SCREEN_APP) {
+    // Long press while app is running → force-exit.
+    // Uses its own tracker (independent of the shared button state machine,
+    // which isn't pumped in this path).
+    {
+      static unsigned long appLpStart = 0;
+      int16_t tx, ty;
+      bool touching = getTouchXY(&tx, &ty);
+      if (touching) {
+        if (appLpStart == 0) appLpStart = millis();
+        else if (millis() - appLpStart >= 800) {
+          appLpStart = 0;
+          luaRuntimeStop();
+          setScreenState(prelaunchScreen == SCREEN_APP ? SCREEN_IDLE : prelaunchScreen);
+          buzzerTick();
+          return;
+        }
+      } else {
+        appLpStart = 0;
+      }
+    }
     if (luaRuntimeRunning()) {
       if (!luaRuntimeTick()) {
         // App finished or called sys.exit() — return to previous screen

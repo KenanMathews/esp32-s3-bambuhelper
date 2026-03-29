@@ -290,9 +290,10 @@ static const luaL_Reg sys_lib[] = {
 
 static int ui_screen(lua_State* L) {
     lv_obj_t* scr = lv_obj_create(NULL);
+    lv_obj_remove_style_all(scr);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(scr, c565(CLR_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(scr, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(scr, 0, LV_PART_MAIN);
     lua_pushlightuserdata(L, scr);
     return 1;
@@ -411,6 +412,8 @@ static int ui_rect(lua_State* L) {
     uint16_t bcol  = (uint16_t)tbl_int(L, 2, "border_color", CLR_TEXT_DARK);
 
     lv_obj_t* obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(obj);  // strip default theme (border, outline, shadow, scroll)
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(obj, w, h);
     lv_obj_set_pos(obj, cx - w / 2, cy - h / 2);
     lv_obj_set_style_bg_color(obj, c565(color), LV_PART_MAIN);
@@ -486,6 +489,9 @@ static int ui_canvas(lua_State* L) {
     lv_obj_t* parent = (lv_obj_t*)lua_touserdata(L, 1);
     int w = (int)luaL_checkinteger(L, 2);
     int h = (int)luaL_checkinteger(L, 3);
+    // optional x, y position (default: 0, 0)
+    int x = (int)luaL_optinteger(L, 4, 0);
+    int y = (int)luaL_optinteger(L, 5, 0);
     if (!parent || w <= 0 || h <= 0) return 0;
 
     size_t buf_size = LV_CANVAS_BUF_SIZE_TRUE_COLOR(w, h);
@@ -495,6 +501,8 @@ static int ui_canvas(lua_State* L) {
     lv_obj_t* canvas = lv_canvas_create(parent);
     lv_canvas_set_buffer(canvas, buf, w, h, LV_IMG_CF_TRUE_COLOR);
     lv_canvas_fill_bg(canvas, c565(CLR_BG), LV_OPA_COVER);
+    lv_obj_set_style_pad_all(canvas, 0, LV_PART_MAIN);
+    lv_obj_set_pos(canvas, x, y);
     lua_pushlightuserdata(L, canvas);
     return 1;
 }

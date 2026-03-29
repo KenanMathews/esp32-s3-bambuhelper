@@ -36,21 +36,14 @@ ui.label(scr, "Layer Timeline", {align="top_mid", y=12, font=16, color=CLR_CYAN}
 -- Job name
 local job_lbl = ui.label(scr, bambu.job_name(), {align="top_mid", y=34, font=14, color=CLR_DIM, w=190})
 
--- Canvas for bar chart
-local canvas = ui.canvas(scr, CHART_W, CHART_H)
+-- Canvas for bar chart, positioned at CHART_X, CHART_Y
+local canvas = ui.canvas(scr, CHART_W, CHART_H, CHART_X, CHART_Y)
 
 -- Layer / progress labels
 local layer_lbl = ui.label(scr, "L 0 / 0", {align="bottom_mid", y=-34, font=14, color=CLR_TEXT})
 local prog_lbl  = ui.label(scr, "0%",       {align="bottom_mid", y=-16, font=14, color=CLR_GREEN})
 
 ui.show(scr)
-
--- Position canvas
--- (canvas was created at default pos; move it into place via rect trick — use label offset)
--- Note: canvas position is set by its parent layout; we place it using its x/y directly.
--- Since ui.canvas returns a handle we can't reposition via SDK yet — build at correct spot
--- by creating a container rect first, then canvas inside it. Workaround: rebuild with offset.
--- For now the canvas renders at 0,0 — we overlay labels around it.
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 local function bar_color(speed)
@@ -63,7 +56,11 @@ local function redraw_chart()
     ui.canvas_clear(canvas, 0x0821)  -- very dark blue background
 
     local count = #bars
-    if count == 0 then return end
+    if count == 0 then
+        -- Draw "Waiting for print..." placeholder text using a center bar
+        ui.canvas_rect(canvas, CHART_W//2 - 40, CHART_H//2 - 1, 80, 2, CLR_DIM)
+        return
+    end
 
     local bar_w = math.floor(CHART_W / MAX_BARS)
     if bar_w < 1 then bar_w = 1 end

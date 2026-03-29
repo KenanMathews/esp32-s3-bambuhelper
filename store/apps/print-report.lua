@@ -24,9 +24,6 @@ local scr = ui.screen()
 
 ui.label(scr, "Print Report", {align="top_mid", y=12, font=16, color=CLR_CYAN})
 
--- Divider
-ui.rect(scr, {cx=120, cy=38, w=190, h=1, color=0x2945})
-
 -- Job name (may be long — clip it)
 ui.label(scr, job, {align="top_mid", y=46, font=14, color=CLR_TEXT, w=200})
 
@@ -45,9 +42,6 @@ for _, row in ipairs(rows) do
     ui.label(scr, row[2], {x=105, y=y, font=14, color=row[3]})
     y = y + 22
 end
-
--- Divider
-ui.rect(scr, {cx=120, cy=185, w=190, h=1, color=0x2945})
 
 ui.label(scr, "Long press to exit", {align="bottom_mid", y=-8, font=14, color=CLR_DIM})
 
