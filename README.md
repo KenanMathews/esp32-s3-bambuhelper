@@ -331,6 +331,20 @@ Perform an antenna mod by soldering two individual goldpins to the antenna pads,
 - OTA firmware updates
 - Multi-language support
 
+## Credits
+
+This project is based on [BambuHelper](https://github.com/Keralots/BambuHelper) by [Keralots](https://github.com/Keralots). The original project was built for an ESP32-S3 Super Mini with a 1.54" ST7789 TFT display using direct SPI rendering.
+
+This fork adapts it for the **Waveshare ESP32-S3-Touch-LCD-1.28** (round 240×240 GC9A01A display) with the following major changes:
+- Migrated rendering from direct SPI/TFT_eSPI to **LVGL 8**
+- Added a **Lua scripting SDK** for user-installable apps
+- Added an **app store** with install/delete over WiFi
+- Added a **3×2 launcher grid** with live clock tile
+- Added **LittleFS** app storage
+- Added a **desktop simulator** for app development
+
+The Bambu MQTT/cloud authentication and printer state logic is largely preserved from the original project.
+
 ## License
 
 MIT
