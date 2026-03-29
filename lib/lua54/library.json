@@ -1,0 +1,9 @@
+{
+  "name": "lua54",
+  "version": "5.4.7",
+  "description": "Lua 5.4 embeddable scripting language",
+  "build": {
+    "srcDir": "src",
+    "flags": ["-DLUA_32BITS"]
+  }
+}

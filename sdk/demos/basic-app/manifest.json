@@ -1,0 +1,11 @@
+{
+  "id": "basic-app",
+  "name": "Basic Status",
+  "description": "Shows printer name, progress arc, nozzle and bed temps",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 1,
+  "category": "display",
+  "tags": ["temperature", "progress", "minimal"],
+  "color": "0x07E0"
+}

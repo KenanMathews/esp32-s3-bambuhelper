@@ -1,6 +1,10 @@
 #include <Arduino.h>
 #include "display_ui.h"
 #include "display_launcher.h"
+#include "screen_printer_list.h"
+#include "app_manager.h"
+#include "lua_runtime.h"
+#include "screen_app.h"
 #include "lvgl_port.h"
 #include "settings.h"
 #include "wifi_manager.h"
@@ -93,31 +97,39 @@ static void handleLauncherSelection(int8_t sel) {
       setScreenState(SCREEN_CLOCK);
       break;
 
+    case LAUNCHER_STORE:
+      setScreenState(SCREEN_STORE);
+      break;
+
     case LAUNCHER_SETTINGS:
-      // Show current screen underneath (web UI accessible via WiFi)
+      // Show idle screen — configure via web UI over WiFi
       setScreenState(SCREEN_IDLE);
       break;
 
-    case LAUNCHER_PRINTER:
-      // Cycle to the next configured printer
-      if (bambuClient.activeCount() >= 2) {
-        uint8_t idx = rotState.displayIndex;
-        for (uint8_t a = 1; a <= MAX_ACTIVE_PRINTERS; a++) {
-          uint8_t next = (idx + a) % MAX_ACTIVE_PRINTERS;
-          if (bambuClient.isConfigured(next) && next != idx) {
-            rotState.displayIndex = next;
-            triggerDisplayTransition();
-            rotState.lastRotateMs = millis();
-            break;
-          }
-        }
-      }
-      setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
-      break;
-
     default:
-      // Dismiss (-2 timeout or long-press again)
-      setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+      if (sel >= LAUNCHER_USER_BASE && sel < LAUNCHER_ITEM_COUNT) {
+        uint8_t appIdx = (uint8_t)(sel - LAUNCHER_USER_BASE);
+        const AppInfo* app = appManagerGetApp(appIdx);
+        if (app) {
+          size_t scriptLen = 0;
+          char* script = appManagerLoadScript(app->id, &scriptLen);
+          if (script) {
+            appScreenPrepare(app->name);
+            setScreenState(SCREEN_APP);
+            luaRuntimeRun(script, scriptLen, app->name);
+            heap_caps_free(script);
+          } else {
+            setScreenState(SCREEN_APP);
+            appScreenPrepare(app->name);
+          }
+        } else {
+          // Empty slot — nothing to do, restore previous screen
+          setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+        }
+      } else {
+        // Dismiss (-2 timeout or unknown)
+        setScreenState(prelaunchScreen == SCREEN_LAUNCHER ? SCREEN_IDLE : prelaunchScreen);
+      }
       break;
   }
 }
@@ -130,8 +142,9 @@ void setup() {
   Serial.printf("\n=== BambuHelper %s Starting ===\n", FW_VERSION);
 
   loadSettings();
-  initDisplay();
-  lvglPortInit();
+  appManagerInit();
+  luaRuntimeInit();
+  initDisplay();   // calls lvglPortInit() internally; shows splash via LVGL
   splashEnd = millis() + 2000;
   setBacklight(brightness);
 }
@@ -155,12 +168,18 @@ void loop() {
   handleWiFi();
   handleWebServer();
 
+  // ── Always pump LVGL except when pong clock owns the display ────────────
+  bool pongActive = (getScreenState() == SCREEN_CLOCK && dispSettings.pongClock);
+  if (!pongActive) {
+    lvglPortTick();
+  }
+
   // ── Launcher active — handle entirely here, skip rest of state machine ───
   if (getScreenState() == SCREEN_LAUNCHER) {
     int8_t sel = launcherUpdate();
     if (sel != -1) {          // selection made or auto-dismissed
       handleLauncherSelection(sel);
-      applyDisplaySettings();  // force full TFT_eSPI redraw over LVGL content
+      applyDisplaySettings();  // re-apply rotation; LVGL invalidates current screen
     }
     // Still pump MQTT and buzzer while launcher is open
     if (isWiFiConnected() && !isAPMode() && bambuClient.isAnyConfigured()) {
@@ -168,6 +187,27 @@ void loop() {
     }
     buzzerTick();
     return;                   // do NOT call updateDisplay() for launcher
+  }
+
+  // ── Printer list active — handle entirely here ───────────────────────────
+  if (getScreenState() == SCREEN_PRINTER_LIST) {
+    int8_t sel = printerListUpdate();
+    if (sel >= 0) {
+      // User tapped a printer — switch to it
+      rotState.displayIndex = (uint8_t)sel;
+      triggerDisplayTransition();
+      rotState.lastRotateMs = millis();
+      setScreenState(SCREEN_IDLE);
+    } else if (sel == -2) {
+      // Timed out — return to whichever screen was showing before the launcher
+      setScreenState(prelaunchScreen == SCREEN_LAUNCHER || prelaunchScreen == SCREEN_PRINTER_LIST
+                      ? SCREEN_IDLE : prelaunchScreen);
+    }
+    if (isWiFiConnected() && !isAPMode() && bambuClient.isAnyConfigured()) {
+      bambuClient.loop();
+    }
+    buzzerTick();
+    return;
   }
 
   // ── Button: long press → launcher (works regardless of WiFi state) ──────

@@ -1,0 +1,15 @@
+{
+  "_comment": "Edit these values to test different printer states. Currently not parsed at runtime — edit sdk_impl/sdk_bambu.c directly to change mock values.",
+  "state": "PRINTING",
+  "progress": 42,
+  "nozzle_temp": 215.0,
+  "nozzle_target": 220.0,
+  "bed_temp": 55.0,
+  "bed_target": 60.0,
+  "remaining_mins": 28,
+  "fan_part_pct": 80,
+  "fan_aux_pct": 30,
+  "printer_name": "My Bambu X1C",
+  "connected": true,
+  "printing": true
+}

@@ -46,8 +46,12 @@
 #define LV_USE_ASSERT_OBJ           0
 
 /* ── Fonts ─────────────────────────────────────────────────────────────────── */
-/* Montserrat fonts — only 14 is used (launcher labels + title) */
-#define LV_FONT_MONTSERRAT_14 1
+/* Montserrat fonts */
+#define LV_FONT_MONTSERRAT_14 1   /* gauge labels, small text, launcher */
+#define LV_FONT_MONTSERRAT_16 1   /* connecting status, idle status */
+#define LV_FONT_MONTSERRAT_20 1   /* gauge values, ETA, clock date, AP SSID */
+#define LV_FONT_MONTSERRAT_28 1   /* larger headings */
+#define LV_FONT_MONTSERRAT_40 1   /* clock time digits */
 
 /* Default font — used by widgets */
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
@@ -71,7 +75,7 @@
 #define LV_USE_SLIDER     0
 #define LV_USE_SPAN       0
 #define LV_USE_SPINBOX    0
-#define LV_USE_SPINNER    0
+#define LV_USE_SPINNER    1   /* connecting screen animated arc */
 #define LV_USE_SWITCH     0
 #define LV_USE_TABVIEW    0
 #define LV_USE_TABLE      0
@@ -100,7 +104,6 @@
 #define LV_USE_METER          0
 #define LV_USE_MSGBOX         0
 #define LV_USE_SPINBOX        0
-#define LV_USE_SPINNER        0
 #define LV_USE_TABVIEW        0
 #define LV_USE_TILEVIEW       0
 #define LV_USE_WIN            0
@@ -117,8 +120,12 @@
 /* Animation: keep enabled for smooth button press feedback */
 #define LV_USE_ANIMATION 1
 
-/* GC9A01A is a round display — no special LVGL config needed;
-   the controller hardware clips pixels outside the circle. */
+/* Draw masks — required for arc widgets, rounded corners, and circular shapes.
+   Without this, lv_arc may not render correctly. */
+#define LV_DRAW_COMPLEX 1
+
+/* GC9A01A is a round display — hardware clips pixels outside the circle.
+   LVGL treats it as a standard 240x240 rect; no circular masking needed in software. */
 
 #endif /* LV_CONF_H */
 #endif /* End "content enable" */

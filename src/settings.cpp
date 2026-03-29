@@ -66,17 +66,17 @@ void defaultDisplaySettings(DisplaySettings& ds) {
   ds.pongClock = false;
   ds.smallLabels = false;
 
-  // Progress: green arc, green label, white value
+  // Progress: bright green
   ds.progress = { CLR_GREEN, CLR_GREEN, CLR_TEXT };
-  // Nozzle: orange arc, orange label, white value
+  // Nozzle: orange (heat)
   ds.nozzle = { CLR_ORANGE, CLR_ORANGE, CLR_TEXT };
-  // Bed: cyan arc, cyan label, white value
-  ds.bed = { CLR_CYAN, CLR_CYAN, CLR_TEXT };
-  // Part fan: cyan arc, cyan label, white value
+  // Bed: accent blue (cool platform) — distinct from cyan fans
+  ds.bed = { CLR_BLUE, CLR_BLUE, CLR_TEXT };
+  // Part fan: cyan (cooling)
   ds.partFan = { CLR_CYAN, CLR_CYAN, CLR_TEXT };
-  // Aux fan: orange arc, orange label, white value
-  ds.auxFan = { CLR_ORANGE, CLR_ORANGE, CLR_TEXT };
-  // Chamber fan: green arc, green label, white value
+  // Aux fan: gold/amber — distinct from orange nozzle and cyan fan
+  ds.auxFan = { CLR_GOLD, CLR_GOLD, CLR_TEXT };
+  // Chamber fan: green — reuse green since it's visible and not conflicting here
   ds.chamberFan = { CLR_GREEN, CLR_GREEN, CLR_TEXT };
 }
 

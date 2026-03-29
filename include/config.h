@@ -33,6 +33,9 @@
 #define CLR_RED          0xF800   // error / hot
 #define CLR_YELLOW       0xFFE0   // pause / warm
 #define CLR_GOLD         0xFEA0   // progress near done
+#define CLR_BTN          0x19D1   // dark navy button background (#1E3A8A)
+#define CLR_BTN_PR       0x231D   // medium blue button pressed (#2563EB)
+#define CLR_BTN_DIS      0x3186   // dark gray disabled button (#333333)
 #define CLR_TRACK        0x18E3   // arc background track
 
 // =============================================================================

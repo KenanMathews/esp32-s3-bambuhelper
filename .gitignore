@@ -1,11 +1,27 @@
+# PlatformIO
 .pio
+
+# IDE
 .vscode
 .claude
 .cache
+
+# Compiled objects
 *.o
+*.o.d
 *.obj
 *.elf
 *.bin
 !firmware/*.bin
 *.map
+*.a
+
+# SDK simulator build output
+sdk/simulator/build/
+sdk/simulator/bin/
+
+# macOS
+.DS_Store
+
+# Tools
 tools/pushall_dump.json
