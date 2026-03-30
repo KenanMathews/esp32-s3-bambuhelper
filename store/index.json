@@ -25,6 +25,17 @@
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/layer-timeline.lua"
     },
     {
+      "id": "crosshair",
+      "name": "Crosshair",
+      "description": "Animated targeting crosshair with radar sweep and sonar ping. Shows during homing.",
+      "author": "BambuHelper",
+      "category": "monitor",
+      "version": "1.0",
+      "sdk_min": 2,
+      "color": 2016,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/crosshair.lua"
+    },
+    {
       "id": "print-report",
       "name": "Print Report",
       "description": "Shows the last completed print report: job name, duration, layers, temps.",

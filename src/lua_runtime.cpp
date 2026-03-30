@@ -163,6 +163,7 @@ void luaRuntimeStop() {
         luaL_unref(L, LUA_REGISTRYINDEX, s_tickRef);
         s_tickRef = LUA_NOREF;
     }
+    sdkCleanup();  // free canvas bufs + LVGL screen before closing VM
     if (L) { lua_close(L); L = nullptr; }
     luaRuntimeInit();
 #endif

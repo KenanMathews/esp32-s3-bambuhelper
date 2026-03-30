@@ -18,5 +18,8 @@ int  sdkGetTickRef(lua_State* L);
 bool sdkExitRequested();
 void sdkClearExitFlag();
 
+// Free canvas buffers, delete LVGL screen, reset state — call before lua_close()
+void sdkCleanup();
+
 #endif // LUA_AVAILABLE
 #endif // SDK_API_H

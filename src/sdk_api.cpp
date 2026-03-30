@@ -11,6 +11,7 @@
 #include <HTTPClient.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <time.h>
 
 extern "C" {
 #include "lua.h"
@@ -24,12 +25,35 @@ extern "C" {
 static bool g_exit_requested = false;
 static int  g_tick_ref       = LUA_NOREF;  // set by sys.on_tick()
 
+// Memory tracking — cleaned up on app exit
+#define MAX_CANVAS_BUFS 8
+static void*      g_canvas_bufs[MAX_CANVAS_BUFS] = {};
+static int        g_canvas_buf_count = 0;
+static lv_obj_t*  g_lua_screen       = nullptr;  // first screen created by app
+
 bool sdkExitRequested() { return g_exit_requested; }
 void sdkClearExitFlag()  { g_exit_requested = false; }
 
 int sdkGetTickRef(lua_State* L) {
     (void)L;
     return g_tick_ref;
+}
+
+void sdkCleanup() {
+    // Free all canvas PSRAM buffers
+    for (int i = 0; i < g_canvas_buf_count; i++) {
+        if (g_canvas_bufs[i]) { heap_caps_free(g_canvas_bufs[i]); g_canvas_bufs[i] = nullptr; }
+    }
+    g_canvas_buf_count = 0;
+
+    // Delete the app's LVGL screen (frees all child widgets from LVGL heap)
+    if (g_lua_screen) {
+        lv_obj_del(g_lua_screen);
+        g_lua_screen = nullptr;
+    }
+
+    g_exit_requested = false;
+    g_tick_ref       = LUA_NOREF;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,18 +263,35 @@ static int sys_http_get(lua_State* L) {
     return 2;
 }
 
-// sys.store_set(key, value)  — persist string under /appdata/{key}
+// sys.store_set(key, value) → bool  — persist string under /appdata/{key}
 static int sys_store_set(lua_State* L) {
     const char* key = luaL_checkstring(L, 1);
     const char* val = luaL_checkstring(L, 2);
-    char path[48];
+    char path[64];
     snprintf(path, sizeof(path), "/appdata/%s", key);
-    // ensure dir
-    if (!LittleFS.exists("/appdata"))
-        LittleFS.mkdir("/appdata");
+    if (!LittleFS.exists("/appdata")) LittleFS.mkdir("/appdata");
+    // Check free space (require at least 4 KB headroom)
+    if (LittleFS.totalBytes() > 0 &&
+        (LittleFS.totalBytes() - LittleFS.usedBytes()) < 4096) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
     File f = LittleFS.open(path, "w");
-    if (f) { f.print(val); f.close(); }
-    return 0;
+    if (!f) { lua_pushboolean(L, 0); return 1; }
+    f.print(val);
+    f.close();
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// sys.store_del(key) → bool  — delete a stored key
+static int sys_store_del(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    char path[64];
+    snprintf(path, sizeof(path), "/appdata/%s", key);
+    bool ok = LittleFS.exists(path) && LittleFS.remove(path);
+    lua_pushboolean(L, ok ? 1 : 0);
+    return 1;
 }
 
 // sys.store_get(key [, default]) → string
@@ -271,6 +312,70 @@ static int sys_store_get(lua_State* L) {
     return 1;
 }
 
+// sys.time() → table {epoch, hour, min, sec, day, month, year, wday, synced}
+static int sys_time(lua_State* L) {
+    time_t now = time(nullptr);
+    struct tm t;
+    localtime_r(&now, &t);
+    bool synced = (t.tm_year > (2020 - 1900));
+
+    lua_newtable(L);
+    lua_pushinteger(L, (long long)now);  lua_setfield(L, -2, "epoch");
+    lua_pushinteger(L, t.tm_hour);       lua_setfield(L, -2, "hour");
+    lua_pushinteger(L, t.tm_min);        lua_setfield(L, -2, "min");
+    lua_pushinteger(L, t.tm_sec);        lua_setfield(L, -2, "sec");
+    lua_pushinteger(L, t.tm_mday);       lua_setfield(L, -2, "day");
+    lua_pushinteger(L, t.tm_mon + 1);    lua_setfield(L, -2, "month");
+    lua_pushinteger(L, t.tm_year + 1900);lua_setfield(L, -2, "year");
+    lua_pushinteger(L, t.tm_wday);       lua_setfield(L, -2, "wday");  // 0=Sun
+    lua_pushboolean(L, synced ? 1 : 0); lua_setfield(L, -2, "synced");
+    return 1;
+}
+
+// recursive helper: push JsonVariant as Lua value
+static void json_to_lua(lua_State* L, JsonVariantConst v) {
+    if (v.is<JsonObjectConst>()) {
+        lua_newtable(L);
+        for (auto kv : v.as<JsonObjectConst>()) {
+            lua_pushstring(L, kv.key().c_str());
+            json_to_lua(L, kv.value());
+            lua_settable(L, -3);
+        }
+    } else if (v.is<JsonArrayConst>()) {
+        lua_newtable(L);
+        int i = 1;
+        for (JsonVariantConst el : v.as<JsonArrayConst>()) {
+            lua_pushinteger(L, i++);
+            json_to_lua(L, el);
+            lua_settable(L, -3);
+        }
+    } else if (v.is<bool>()) {
+        lua_pushboolean(L, v.as<bool>() ? 1 : 0);
+    } else if (v.is<long long>()) {
+        lua_pushinteger(L, v.as<long long>());
+    } else if (v.is<double>()) {
+        lua_pushnumber(L, (lua_Number)v.as<double>());
+    } else if (v.is<const char*>()) {
+        lua_pushstring(L, v.as<const char*>());
+    } else {
+        lua_pushnil(L);
+    }
+}
+
+// sys.json_parse(str) → table or nil, errmsg
+static int sys_json_parse(lua_State* L) {
+    const char* str = luaL_checkstring(L, 1);
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, str);
+    if (err) {
+        lua_pushnil(L);
+        lua_pushstring(L, err.c_str());
+        return 2;
+    }
+    json_to_lua(L, doc.as<JsonVariantConst>());
+    return 1;
+}
+
 static const luaL_Reg sys_lib[] = {
     { "millis",      sys_millis      },
     { "beep",        sys_beep        },
@@ -281,6 +386,9 @@ static const luaL_Reg sys_lib[] = {
     { "http_get",    sys_http_get    },
     { "store_set",   sys_store_set   },
     { "store_get",   sys_store_get   },
+    { "store_del",   sys_store_del   },
+    { "time",        sys_time        },
+    { "json_parse",  sys_json_parse  },
     { nullptr,       nullptr         }
 };
 
@@ -295,6 +403,8 @@ static int ui_screen(lua_State* L) {
     lv_obj_set_style_bg_color(scr, c565(CLR_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_pad_all(scr, 0, LV_PART_MAIN);
+    // Track the first screen created — used for cleanup on exit
+    if (!g_lua_screen) g_lua_screen = scr;
     lua_pushlightuserdata(L, scr);
     return 1;
 }
@@ -497,6 +607,9 @@ static int ui_canvas(lua_State* L) {
     size_t buf_size = LV_CANVAS_BUF_SIZE_TRUE_COLOR(w, h);
     void* buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!buf) { lua_pushnil(L); return 1; }
+    // Track for cleanup on app exit
+    if (g_canvas_buf_count < MAX_CANVAS_BUFS)
+        g_canvas_bufs[g_canvas_buf_count++] = buf;
 
     lv_obj_t* canvas = lv_canvas_create(parent);
     lv_canvas_set_buffer(canvas, buf, w, h, LV_IMG_CF_TRUE_COLOR);
@@ -550,6 +663,47 @@ static int ui_canvas_rect(lua_State* L) {
     return 0;
 }
 
+// ui.canvas_circle(canvas, cx, cy, r, color [, thickness])
+static int ui_canvas_circle(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!canvas) return 0;
+    lv_coord_t cx    = (lv_coord_t)luaL_checkinteger(L, 2);
+    lv_coord_t cy    = (lv_coord_t)luaL_checkinteger(L, 3);
+    lv_coord_t r     = (lv_coord_t)luaL_checkinteger(L, 4);
+    uint16_t   color = (uint16_t)luaL_optinteger(L, 5, CLR_TEXT);
+    int        width = (int)luaL_optinteger(L, 6, 1);
+
+    lv_draw_arc_dsc_t dsc;
+    lv_draw_arc_dsc_init(&dsc);
+    dsc.color = c565(color);
+    dsc.width = width;
+    dsc.opa   = LV_OPA_COVER;
+    lv_canvas_draw_arc(canvas, cx, cy, r, 0, 360, &dsc);
+    return 0;
+}
+
+// ui.canvas_arc(canvas, cx, cy, r, a1, a2, color [, thickness])
+// angles in degrees, 0 = right, clockwise
+static int ui_canvas_arc(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!canvas) return 0;
+    lv_coord_t cx    = (lv_coord_t)luaL_checkinteger(L, 2);
+    lv_coord_t cy    = (lv_coord_t)luaL_checkinteger(L, 3);
+    lv_coord_t r     = (lv_coord_t)luaL_checkinteger(L, 4);
+    int32_t    a1    = (int32_t)luaL_checkinteger(L, 5);
+    int32_t    a2    = (int32_t)luaL_checkinteger(L, 6);
+    uint16_t   color = (uint16_t)luaL_optinteger(L, 7, CLR_TEXT);
+    int        width = (int)luaL_optinteger(L, 8, 1);
+
+    lv_draw_arc_dsc_t dsc;
+    lv_draw_arc_dsc_init(&dsc);
+    dsc.color = c565(color);
+    dsc.width = width;
+    dsc.opa   = LV_OPA_COVER;
+    lv_canvas_draw_arc(canvas, cx, cy, r, a1, a2, &dsc);
+    return 0;
+}
+
 // ui.canvas_clear(canvas, color)
 static int ui_canvas_clear(lua_State* L) {
     lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
@@ -584,10 +738,12 @@ static const luaL_Reg ui_lib[] = {
     { "rect_set",     ui_rect_set    },
     { "rect_size",    ui_rect_size   },
     { "animate",      ui_animate     },
-    { "canvas",       ui_canvas      },
-    { "canvas_line",  ui_canvas_line },
-    { "canvas_rect",  ui_canvas_rect },
-    { "canvas_clear", ui_canvas_clear},
+    { "canvas",        ui_canvas        },
+    { "canvas_line",   ui_canvas_line   },
+    { "canvas_rect",   ui_canvas_rect   },
+    { "canvas_circle", ui_canvas_circle },
+    { "canvas_arc",    ui_canvas_arc    },
+    { "canvas_clear",  ui_canvas_clear  },
     { "show",         ui_show        },
     { "delete",       ui_obj_delete  },
     { nullptr,        nullptr        }
