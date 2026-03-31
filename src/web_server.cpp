@@ -9,9 +9,11 @@
 #include "button.h"
 #include "buzzer.h"
 #include "timezones.h"
+#include "app_manager.h"
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <LittleFS.h>
 
 static WebServer server(80);
 
@@ -504,7 +506,36 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
   </div>
 </div>
 
-<!-- ===== Section 5: Diagnostics ===== -->
+<!-- ===== Section 5: App Flasher ===== -->
+<div class="section" id="s-apps">
+  <div class="section-header" onclick="toggleSection('apps')">
+    <h2>App Flasher</h2>
+    <span class="arrow" id="arr-apps">&#9654;</span>
+  </div>
+  <div class="section-content" id="sec-apps">
+    <div class="section-body">
+      <div style="font-size:13px;color:#8B949E;margin-bottom:12px">Upload a <code>.lua</code> app directly to the device. Max 8 installed apps.</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="appFile" accept=".lua" style="font-size:13px;color:#E6EDF3">
+        <button type="button" class="btn btn-primary" style="font-size:13px;padding:8px" onclick="uploadApp()">Flash App</button>
+      </div>
+      <div id="appStatus" style="margin-top:8px;font-size:13px"></div>
+      <div style="margin-top:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#E6EDF3">Installed Apps</div>
+        <table id="appTable" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="color:#8B949E;border-bottom:1px solid #30363D">
+            <th style="text-align:left;padding:4px 8px">Name</th>
+            <th style="text-align:left;padding:4px 8px">ID</th>
+            <th style="text-align:right;padding:4px 8px">Action</th>
+          </tr></thead>
+          <tbody id="appTableBody">%APPS_LIST%</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Section 6: Diagnostics ===== -->
 <div class="section" id="s-diag">
   <div class="section-header" onclick="toggleSection('diag')">
     <h2>Diagnostics</h2>
@@ -916,6 +947,63 @@ function startOta(){
   clk.onchange=upd;
   upd();
 })();
+
+// ── App Flasher ──────────────────────────────────────────────────────────────
+function uploadApp(){
+  var f=document.getElementById('appFile').files[0];
+  var stat=document.getElementById('appStatus');
+  if(!f){stat.innerHTML='<span style="color:#F85149">Select a .lua file first</span>';return;}
+  if(!f.name.endsWith('.lua')){stat.innerHTML='<span style="color:#F85149">File must be a .lua script</span>';return;}
+  if(f.size>65536){stat.innerHTML='<span style="color:#F85149">File too large (max 64 KB)</span>';return;}
+  stat.innerHTML='<span style="color:#58A6FF">Uploading...</span>';
+  var fd=new FormData();
+  fd.append('app',f);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/app/upload',true);
+  xhr.onload=function(){
+    try{
+      var d=JSON.parse(xhr.responseText);
+      if(d.status==='ok'){
+        stat.innerHTML='<span style="color:#3FB950">Installed: '+d.name+'</span>';
+        refreshApps();
+      } else {
+        stat.innerHTML='<span style="color:#F85149">Error: '+d.message+'</span>';
+      }
+    } catch(e){
+      stat.innerHTML='<span style="color:#F85149">Unexpected response</span>';
+    }
+  };
+  xhr.onerror=function(){stat.innerHTML='<span style="color:#F85149">Upload failed</span>';};
+  xhr.send(fd);
+}
+function deleteApp(id){
+  if(!confirm('Delete app "'+id+'"?')) return;
+  var fd=new URLSearchParams();
+  fd.append('id',id);
+  fetch('/app/delete',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.status==='ok') refreshApps();
+      else alert('Delete failed: '+d.message);
+    });
+}
+function refreshApps(){
+  fetch('/app/list').then(function(r){return r.json();}).then(function(d){
+    var tbody=document.getElementById('appTableBody');
+    if(!d.apps||d.apps.length===0){
+      tbody.innerHTML='<tr><td colspan="3" style="padding:8px;color:#8B949E;font-size:12px">No apps installed</td></tr>';
+      return;
+    }
+    tbody.innerHTML=d.apps.map(function(a){
+      return '<tr style="border-bottom:1px solid #21262D">'
+        +'<td style="padding:6px 8px">'+a.name+'</td>'
+        +'<td style="padding:6px 8px;color:#8B949E;font-size:12px">'+a.id+'</td>'
+        +'<td style="padding:6px 8px;text-align:right">'
+        +'<button onclick="deleteApp(\''+a.id+'\')" style="background:#DA3633;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px">Delete</button>'
+        +'</td></tr>';
+    }).join('');
+  });
+}
 </script>
 </body>
 </html>
@@ -1061,6 +1149,28 @@ static String processTemplate(const String& html) {
   page.replace("%BUZ_QS%", String(buzzerSettings.quietStartHour));
   page.replace("%BUZ_QE%", String(buzzerSettings.quietEndHour));
   page.replace("%STORE_URL%", storeUrl);
+
+  // Installed apps table rows
+  {
+    String rows = "";
+    uint8_t cnt = appManagerCount();
+    if (cnt == 0) {
+      rows = "<tr><td colspan=\"3\" style=\"padding:8px;color:#8B949E;font-size:12px\">No apps installed</td></tr>";
+    } else {
+      for (uint8_t i = 0; i < cnt; i++) {
+        const AppInfo* a = appManagerGetApp(i);
+        if (!a) continue;
+        rows += "<tr style=\"border-bottom:1px solid #21262D\">";
+        rows += "<td style=\"padding:6px 8px\">" + String(a->name) + "</td>";
+        rows += "<td style=\"padding:6px 8px;color:#8B949E;font-size:12px\">" + String(a->id) + "</td>";
+        rows += "<td style=\"padding:6px 8px;text-align:right\">"
+                "<button onclick=\"deleteApp('" + String(a->id) + "')\" "
+                "style=\"background:#DA3633;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px\">Delete</button>"
+                "</td></tr>";
+      }
+    }
+    page.replace("%APPS_LIST%", rows);
+  }
 
   return page;
 }
@@ -1697,6 +1807,118 @@ static void handleOtaFinish() {
 }
 
 // ---------------------------------------------------------------------------
+//  App Flasher — upload / delete / list
+// ---------------------------------------------------------------------------
+static String s_appUploadId  = "";
+static String s_appUploadErr = "";
+static bool   s_appFileOpen  = false;
+
+// Write each upload chunk directly to LittleFS (append mode after first chunk).
+// We avoid a static File handle by opening/closing around each write.
+static void handleAppUpload() {
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    s_appUploadErr = "";
+    s_appUploadId  = "";
+    s_appFileOpen  = false;
+
+    if (appManagerCount() >= APP_MAX_INSTALLED) {
+      s_appUploadErr = "Max apps reached (8). Delete one first.";
+      return;
+    }
+
+    // Derive id from filename: strip .lua, replace non-alnum with '-'
+    String fname = upload.filename;
+    if (fname.endsWith(".lua")) fname = fname.substring(0, fname.length() - 4);
+    String id = "";
+    for (size_t i = 0; i < fname.length(); i++) {
+      char c = fname[i];
+      if (isalnum(c)) id += (char)tolower(c);
+      else if (id.length() > 0 && id[id.length()-1] != '-') id += '-';
+    }
+    if (id.length() == 0 || id.length() >= APP_ID_LEN) {
+      s_appUploadErr = "Invalid filename"; return;
+    }
+    s_appUploadId = id;
+    // Truncate/create the file now (write mode) so it starts empty
+    String path = "/apps/" + id + ".lua";
+    fs::File f = LittleFS.open(path, "w");
+    if (!f) { s_appUploadErr = "Cannot write file"; return; }
+    f.close();
+    s_appFileOpen = true;   // signals: file created, ready for appends
+
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (s_appUploadErr.length() > 0 || !s_appFileOpen) return;
+    String path = "/apps/" + s_appUploadId + ".lua";
+    fs::File f = LittleFS.open(path, "a");
+    if (!f) { s_appUploadErr = "Write error"; s_appFileOpen = false; return; }
+    size_t written = f.write(upload.buf, upload.currentSize);
+    f.close();
+    if (written != upload.currentSize) {
+      s_appUploadErr = "Write error";
+      s_appFileOpen  = false;
+    }
+
+  } else if (upload.status == UPLOAD_FILE_END) {
+    s_appFileOpen = false;
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    s_appFileOpen = false;
+    if (s_appUploadId.length() > 0) {
+      LittleFS.remove(("/apps/" + s_appUploadId + ".lua"));
+    }
+    s_appUploadErr = "Upload aborted";
+  }
+}
+
+static void handleAppUploadFinish() {
+  if (s_appUploadErr.length() > 0) {
+    String msg = "{\"status\":\"error\",\"message\":\"" + s_appUploadErr + "\"}";
+    server.send(400, "application/json", msg);
+    s_appUploadErr = "";
+    return;
+  }
+  // Re-scan app manager so the new file is picked up
+  appManagerInit();
+  // Find the app to get its parsed name
+  String name = s_appUploadId;
+  uint8_t cnt = appManagerCount();
+  for (uint8_t i = 0; i < cnt; i++) {
+    const AppInfo* a = appManagerGetApp(i);
+    if (a && s_appUploadId == String(a->id)) { name = String(a->name); break; }
+  }
+  server.send(200, "application/json",
+    "{\"status\":\"ok\",\"id\":\"" + s_appUploadId + "\",\"name\":\"" + name + "\"}");
+  s_appUploadId = "";
+}
+
+static void handleAppDelete() {
+  if (!server.hasArg("id")) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing id\"}");
+    return;
+  }
+  String id = server.arg("id");
+  if (appManagerDelete(id.c_str())) {
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  } else {
+    server.send(404, "application/json", "{\"status\":\"error\",\"message\":\"Not found\"}");
+  }
+}
+
+static void handleAppList() {
+  String json = "{\"apps\":[";
+  uint8_t cnt = appManagerCount();
+  for (uint8_t i = 0; i < cnt; i++) {
+    const AppInfo* a = appManagerGetApp(i);
+    if (!a) continue;
+    if (i > 0) json += ",";
+    json += "{\"id\":\"" + String(a->id) + "\",\"name\":\"" + String(a->name) + "\"}";
+  }
+  json += "]}";
+  server.send(200, "application/json", json);
+}
+
+// ---------------------------------------------------------------------------
 //  Save store URL
 // ---------------------------------------------------------------------------
 static void handleSaveStoreUrl() {
@@ -1729,6 +1951,9 @@ void initWebServer() {
   server.on("/settings/export", HTTP_GET, handleSettingsExport);
   server.on("/settings/import", HTTP_POST, handleSettingsImportFinish, handleSettingsImportUpload);
   server.on("/ota/upload", HTTP_POST, handleOtaFinish, handleOtaUpload);
+  server.on("/app/upload", HTTP_POST, handleAppUploadFinish, handleAppUpload);
+  server.on("/app/delete", HTTP_POST, handleAppDelete);
+  server.on("/app/list", HTTP_GET, handleAppList);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("Web server started on port 80");

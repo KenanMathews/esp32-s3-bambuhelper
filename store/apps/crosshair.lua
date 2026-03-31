@@ -17,7 +17,6 @@ local W, H, CX, CY = 240, 240, 120, 120
 
 local scr    = ui.screen()
 local canvas = ui.canvas(scr, W, H, 0, 0)
-ui.show(scr)
 
 -- ── Animation state ──────────────────────────────────────────────────────────
 local sweep_angle = 0       -- rotating sweep arm
@@ -39,7 +38,7 @@ local function draw_ticks()
         local y1   = CY + math.floor((ROUT - 4) * math.sin(rad))
         local x2   = CX + math.floor((ROUT + 4) * math.cos(rad))
         local y2   = CY + math.floor((ROUT + 4) * math.sin(rad))
-        ui.canvas_line(canvas, x1, y1, x2, y2, CLR_DIM)
+        ui.canvas_line(canvas, x1, y1, x2, y2, CLR_DIM, 1)
     end
 end
 
@@ -57,18 +56,18 @@ local function redraw(dt)
     draw_ticks()
 
     -- Crosshair lines (gap around centre)
-    ui.canvas_line(canvas, CX, CY - ROUT + 2, CX, CY - GAP, CLR_GREEN)
-    ui.canvas_line(canvas, CX, CY + GAP,      CX, CY + ROUT - 2, CLR_GREEN)
-    ui.canvas_line(canvas, CX - ROUT + 2, CY, CX - GAP, CY, CLR_GREEN)
-    ui.canvas_line(canvas, CX + GAP,      CY, CX + ROUT - 2, CY, CLR_GREEN)
+    ui.canvas_line(canvas, CX, CY - ROUT + 2, CX, CY - GAP, CLR_GREEN, 1)
+    ui.canvas_line(canvas, CX, CY + GAP,      CX, CY + ROUT - 2, CLR_GREEN, 1)
+    ui.canvas_line(canvas, CX - ROUT + 2, CY, CX - GAP, CY, CLR_GREEN, 1)
+    ui.canvas_line(canvas, CX + GAP,      CY, CX + ROUT - 2, CY, CLR_GREEN, 1)
 
     -- Diagonal accent lines (45°, short)
     local D = 14
     local O = math.floor(ROUT * 0.65)
-    ui.canvas_line(canvas, CX - O, CY - O, CX - O + D, CY - O + D, CLR_DIM)
-    ui.canvas_line(canvas, CX + O, CY - O, CX + O - D, CY - O + D, CLR_DIM)
-    ui.canvas_line(canvas, CX - O, CY + O, CX - O + D, CY + O - D, CLR_DIM)
-    ui.canvas_line(canvas, CX + O, CY + O, CX + O - D, CY + O - D, CLR_DIM)
+    ui.canvas_line(canvas, CX - O, CY - O, CX - O + D, CY - O + D, CLR_DIM, 1)
+    ui.canvas_line(canvas, CX + O, CY - O, CX + O - D, CY - O + D, CLR_DIM, 1)
+    ui.canvas_line(canvas, CX - O, CY + O, CX - O + D, CY + O - D, CLR_DIM, 1)
+    ui.canvas_line(canvas, CX + O, CY + O, CX + O - D, CY + O - D, CLR_DIM, 1)
 
     -- Rotating sweep arc (60° wide)
     ui.canvas_arc(canvas, CX, CY, RMID - 4, sweep_angle, sweep_angle + 60, CLR_GREEN, 3)
@@ -84,8 +83,8 @@ local function redraw(dt)
     if show_dot then
         ui.canvas_circle(canvas, CX, CY, RPIN, CLR_RED, 2)
         -- small cross in dot
-        ui.canvas_line(canvas, CX - 4, CY, CX + 4, CY, CLR_WHITE)
-        ui.canvas_line(canvas, CX, CY - 4, CX, CY + 4, CLR_WHITE)
+        ui.canvas_line(canvas, CX - 4, CY, CX + 4, CY, CLR_WHITE, 1)
+        ui.canvas_line(canvas, CX, CY - 4, CX, CY + 4, CLR_WHITE, 1)
     else
         ui.canvas_circle(canvas, CX, CY, RPIN, CLR_DIM, 1)
     end
@@ -105,9 +104,5 @@ sys.on_tick(function(dt)
 
     redraw(dt)
 
-    -- Exit when printer leaves homing / moves to printing or idle
-    local state = bambu.state()
-    if state == "RUNNING" or state == "FINISH" or state == "FAILED" then
-        sys.exit()
-    end
+    -- Long press exits via the C layer; no auto-exit here
 end)

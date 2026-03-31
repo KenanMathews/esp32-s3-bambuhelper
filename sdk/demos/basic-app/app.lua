@@ -53,7 +53,5 @@ ui.label(scr, string.format("%.0f\xc2\xb0C", bambu.bed_temp()), {
     color = 0x34DF, font = 16
 })
 
--- Show the screen
-ui.show(scr)
 
 sys.log("basic-app loaded — " .. bambu.printer_name())

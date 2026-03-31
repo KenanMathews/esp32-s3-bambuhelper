@@ -21,5 +21,11 @@ void sdkClearExitFlag();
 // Free canvas buffers, delete LVGL screen, reset state — call before lua_close()
 void sdkCleanup();
 
+// Called every tick from lua_runtime — fire due sys.every() timers
+void sdkTickTimers(lua_State* L);
+
+// Called every tick from lua_runtime — drain deferred ui.on_tap() callbacks
+void sdkDrainTapQueue(lua_State* L);
+
 #endif // LUA_AVAILABLE
 #endif // SDK_API_H

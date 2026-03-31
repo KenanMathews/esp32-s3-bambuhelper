@@ -123,7 +123,9 @@ static void handleLauncherSelection(int8_t sel) {
           char* script = appManagerLoadScript(app->id, &scriptLen);
           if (script) {
             appScreenPrepare(app->name);
-            setScreenState(SCREEN_APP);
+            lv_scr_load(appScreenGet());  // show "Loading..." before script runs
+            lvglPortTick();               // render one frame so it's actually visible
+            setScreenState(SCREEN_APP);   // set state (skips lv_scr_load — script handles it)
             luaRuntimeRun(script, scriptLen, app->name);
             heap_caps_free(script);
           } else {

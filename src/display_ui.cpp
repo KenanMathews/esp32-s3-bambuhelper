@@ -156,12 +156,12 @@ void setScreenState(ScreenState state) {
         }
     }
 
-    // Load LVGL screen (launcher and store manage their own lv_scr_load)
+    // Load LVGL screen (launcher, store, and app manage their own lv_scr_load)
     if (state == SCREEN_STORE) {
         storeScreenEnter();  // handles lv_scr_load + HTTP fetch
     } else if (state == SCREEN_INFO) {
         infoScreenEnter();   // updates live data then loads screen
-    } else if (state != SCREEN_LAUNCHER) {
+    } else if (state != SCREEN_LAUNCHER && state != SCREEN_APP) {
         // For pong clock, clockTextScreenGet() returns a blank screen
         // that serves as the LVGL owner while pong draws over TFT_eSPI
         lv_obj_t* scr = screenObjFor(state);

@@ -26,15 +26,15 @@ local scr = ui.screen()
 
 -- Outer progress ring (full circle, 270° sweep)
 local prog_arc = ui.arc(scr, {cx=120, cy=120, size=108, value=0,
-    color=CLR_GREEN, track=CLR_DARK, width=10})
+    color=CLR_GREEN, track=CLR_DARK, thickness=10})
 
 -- Middle nozzle ring
 local noz_arc = ui.arc(scr, {cx=120, cy=120, size=90, value=0,
-    color=CLR_ORANGE, track=CLR_DARK, width=7})
+    color=CLR_ORANGE, track=CLR_DARK, thickness=7})
 
 -- Inner bed ring
 local bed_arc = ui.arc(scr, {cx=120, cy=120, size=75, value=0,
-    color=CLR_BLUE, track=CLR_DARK, width=7})
+    color=CLR_BLUE, track=CLR_DARK, thickness=7})
 
 -- Center: big percent
 local pct_lbl = ui.label(scr, "0%", {align="center", y=-18, font=28, color=CLR_TEXT})
@@ -59,8 +59,6 @@ local bed_lbl = ui.label(scr, "B --°", {x=145, y=190, font=14, color=CLR_BLUE})
 
 -- State badge top-center
 local state_lbl = ui.label(scr, "IDLE", {align="top_mid", y=10, font=14, color=CLR_DIM})
-
-ui.show(scr)
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 local speed_names = {"Silent", "Std", "Sport", "Ludicrous"}

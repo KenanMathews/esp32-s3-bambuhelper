@@ -44,7 +44,7 @@ lv_obj_t* appScreenGet() {
 
 void appScreenPrepare(const char* appName) {
     if (g_title_lbl)  lv_label_set_text(g_title_lbl,  appName ? appName : "");
-    if (g_status_lbl) lv_label_set_text(g_status_lbl, "Running...");
+    if (g_status_lbl) lv_label_set_text(g_status_lbl, "Loading...");
 }
 
 void appScreenUpdate() {

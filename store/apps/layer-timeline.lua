@@ -43,8 +43,6 @@ local canvas = ui.canvas(scr, CHART_W, CHART_H, CHART_X, CHART_Y)
 local layer_lbl = ui.label(scr, "L 0 / 0", {align="bottom_mid", y=-34, font=14, color=CLR_TEXT})
 local prog_lbl  = ui.label(scr, "0%",       {align="bottom_mid", y=-16, font=14, color=CLR_GREEN})
 
-ui.show(scr)
-
 -- ── Helpers ────────────────────────────────────────────────────────────────
 local function bar_color(speed)
     if speed >= 3 then return CLR_ORANGE end  -- sport/ludicrous
@@ -75,7 +73,7 @@ local function redraw_chart()
     -- Horizontal gridlines at 25%, 50%, 75%
     for _, pct in ipairs({25, 50, 75}) do
         local y = CHART_H - math.floor(pct / 100 * CHART_H)
-        ui.canvas_line(canvas, 0, y, CHART_W, y, CLR_DARK)
+        ui.canvas_line(canvas, 0, y, CHART_W, y, CLR_DARK, 1)
     end
 end
 

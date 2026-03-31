@@ -126,6 +126,8 @@ bool luaRuntimeTick() {
         return false;
     }
 
+    sdkTickTimers(L);
+
     lua_rawgeti(L, LUA_REGISTRYINDEX, s_tickRef);
     lua_pushinteger(L, (long long)dt);
     int result = lua_pcall(L, 1, 0, 0);
@@ -139,6 +141,8 @@ bool luaRuntimeTick() {
         s_tickRef = LUA_NOREF;
         return false;
     }
+
+    sdkDrainTapQueue(L);
 
     // Check exit flag again — may have been set inside the tick
     if (sdkExitRequested()) {

@@ -326,6 +326,238 @@ Perform an antenna mod by soldering two individual goldpins to the antenna pads,
 - Check rotation mode in the web interface (Multi-Printer section). Smart mode only switches automatically when a printer is actively printing.
 - Press the physical button (if configured) to manually cycle between printers.
 
+## Lua SDK
+
+BambuHelper apps are Lua 5.4 scripts that run on the device. The SDK exposes three modules — `ui`, `sys`, and `bambu` — plus an app manifest in header comments.
+
+### App File Format
+
+Every app is a `.lua` file with header comments that describe it to the app store:
+
+```lua
+-- @name        My App          (display name)
+-- @color       0x07E0          (tile accent color, RGB565)
+-- @sdk_min     2               (minimum SDK version required)
+-- @version     1.0
+-- @author      Your Name
+-- @category    monitor         (monitor | tool | fun)
+-- @description One-line description shown in the store.
+```
+
+### App Lifecycle
+
+```lua
+-- 1. Create your screen (auto-shown immediately)
+local scr = ui.screen()
+
+-- 2. Build widgets on the screen
+local lbl = ui.label(scr, "Hello!", {align="center", font=24, color=0xFFFF})
+
+-- 3. Register a tick callback (called ~30 times/second)
+sys.on_tick(function(dt)
+    -- dt = milliseconds since last tick
+    ui.label_set(lbl, "Time: " .. sys.time())
+end)
+
+-- 4. Or use interval timers instead of on_tick
+sys.every(1000, function()
+    ui.label_set(lbl, bambu.job_name())
+end)
+```
+
+---
+
+### `ui.*` — Widget API
+
+#### Screen & Containers
+
+| Function | Description |
+|---|---|
+| `ui.screen()` | Create and immediately show a new full-screen LVGL screen. Returns a screen handle. |
+
+#### Widgets
+
+All widget constructors take `(parent, [text_or_value], opts_table)` and return a handle.
+
+| Function | Opts keys | Description |
+|---|---|---|
+| `ui.label(parent, text, opts)` | `x y w align font color` | Text label |
+| `ui.arc(parent, opts)` | `cx cy size value color track thickness start sweep` | Arc/ring gauge |
+| `ui.rect(parent, opts)` | `x y w h color radius` | Filled rectangle |
+| `ui.canvas(parent, w, h, x, y)` | — | Raw drawing surface |
+
+`align` values: `"center"`, `"top_mid"`, `"bottom_mid"`, `"top_left"`, `"top_right"`, etc. (LVGL align names)
+
+#### Update Functions
+
+| Function | Description |
+|---|---|
+| `ui.label_set(handle, text)` | Update label text |
+| `ui.label_color(handle, color)` | Update label color |
+| `ui.arc_set(handle, value)` | Set arc value (0–100) |
+| `ui.arc_color(handle, color)` | Set arc foreground color |
+| `ui.rect_set(handle, color)` | Set rect fill color |
+| `ui.rect_size(handle, w, h)` | Resize rect |
+| `ui.delete(handle)` | Delete a widget |
+
+#### Canvas Drawing
+
+All canvas functions take the canvas handle as first argument. Colors are RGB565 integers.
+
+| Function | Description |
+|---|---|
+| `ui.canvas_clear(canvas, color)` | Fill entire canvas with color |
+| `ui.canvas_rect(canvas, x, y, w, h, color)` | Draw filled rectangle |
+| `ui.canvas_circle(canvas, cx, cy, r, color, thickness)` | Draw circle outline |
+| `ui.canvas_line(canvas, x1, y1, x2, y2, color, width)` | Draw line (color and width both required) |
+| `ui.canvas_arc(canvas, cx, cy, r, start_deg, end_deg, color, thickness)` | Draw arc segment |
+
+#### Animations
+
+| Function | Description |
+|---|---|
+| `ui.anim_fade(handle, from, to, opts)` | Fade opacity from→to. `opts`: `{time=300, delay=0, repeat=false, bounce=false}` |
+| `ui.anim_move(handle, x, y, opts)` | Animate widget to position (x, y). Same opts as above. |
+
+#### Events
+
+| Function | Description |
+|---|---|
+| `ui.on_tap(handle, fn)` | Call `fn()` when widget is tapped. Safe to call Lua — events are deferred and fired after the tick. |
+
+#### Color Helper
+
+| Function | Description |
+|---|---|
+| `ui.color(r, g, b)` | Convert 8-bit RGB values to an RGB565 integer. Values are clamped to 0–255. |
+
+---
+
+### `sys.*` — System API
+
+| Function | Description |
+|---|---|
+| `sys.on_tick(fn)` | Register tick callback `fn(dt_ms)`. Called ~30×/second. Only one callback per app. |
+| `sys.every(ms, fn)` | Register interval timer. Fires `fn()` every `ms` milliseconds independently of `on_tick`. Max 8 timers per app. |
+| `sys.millis()` | Returns milliseconds since device boot. |
+| `sys.time()` | Returns current time as a formatted string (e.g. `"14:32"`). |
+| `sys.log(msg)` | Print a string to the serial console for debugging. |
+| `sys.beep()` | Emit a short beep (if buzzer is connected). |
+| `sys.exit()` | Stop the app and return to the launcher. |
+| `sys.store_set(key, value)` | Persist a string value to flash (survives reboots and app restarts). |
+| `sys.store_get(key)` | Read a persisted string value. Returns `nil` if key not found. |
+| `sys.store_del(key)` | Delete a persisted key. |
+| `sys.http_get(url)` | Blocking HTTP GET. Returns response body string or `nil` on failure. |
+| `sys.json_parse(str)` | Parse a JSON string into a Lua table. Returns `nil` on parse error. |
+
+---
+
+### `bambu.*` — Printer Data API
+
+All functions return live data from the connected Bambu Lab printer. Values are 0/`""` when the printer is idle or unreachable.
+
+#### Print State
+
+| Function | Returns | Description |
+|---|---|---|
+| `bambu.state()` | `string` | One of: `"IDLE"`, `"PRINTING"`, `"PAUSE"`, `"FAILED"`, `"FINISH"`, `"PREPARE"` |
+| `bambu.printing()` | `boolean` | `true` when actively printing (not paused or idle) |
+| `bambu.connected()` | `boolean` | `true` when printer is reachable over the network |
+| `bambu.progress()` | `integer` 0–100 | Print progress percentage |
+| `bambu.layer()` | `integer` | Current layer number |
+| `bambu.total_layers()` | `integer` | Total layers in the job |
+| `bambu.job_name()` | `string` | Current print job filename |
+| `bambu.speed()` | `integer` | Speed level: 0=Silent, 1=Standard, 2=Sport, 3=Ludicrous |
+| `bambu.remaining_mins()` | `integer` | Estimated minutes remaining |
+
+#### Temperatures
+
+| Function | Returns | Description |
+|---|---|---|
+| `bambu.nozzle_temp()` | `number` | Current nozzle temperature °C |
+| `bambu.nozzle_target()` | `number` | Nozzle target setpoint °C |
+| `bambu.bed_temp()` | `number` | Current bed temperature °C |
+| `bambu.bed_target()` | `number` | Bed target setpoint °C |
+| `bambu.chamber_temp()` | `number` | Chamber temperature °C |
+
+#### Fans
+
+| Function | Returns | Description |
+|---|---|---|
+| `bambu.fan_part()` | `integer` 0–100 | Part cooling fan speed % |
+| `bambu.fan_aux()` | `integer` 0–100 | Auxiliary fan speed % |
+| `bambu.fan_chamber()` | `integer` 0–100 | Chamber fan speed % |
+
+#### AMS (Filament System)
+
+| Function | Returns | Description |
+|---|---|---|
+| `bambu.ams_color(tray)` | `integer` | RGB565 color of tray 0–15. Returns `0` (not nil) when absent — always check `> 0` before using. |
+| `bambu.ams_type(tray)` | `string` | Filament type string (e.g. `"PLA"`, `"PETG"`). `""` when absent. |
+| `bambu.ams_active()` | `integer` | Active tray index 0–15, or `-1` if no AMS tray is active. |
+
+#### Device
+
+| Function | Returns | Description |
+|---|---|---|
+| `bambu.printer_name()` | `string` | User-configured printer name |
+
+---
+
+### Example App
+
+```lua
+-- @name Temp Watch
+-- @color 0xF800
+-- @sdk_min 2
+-- @version 1.0
+-- @author Example
+-- @category monitor
+-- @description Displays nozzle and bed temperatures with color-coded arcs.
+
+local CLR_ORANGE = 0xFBE0
+local CLR_BLUE   = 0x34DF
+local CLR_GREEN  = 0x07E0
+local CLR_TEXT   = 0xFFFF
+local CLR_DARK   = 0x18E3
+
+local scr = ui.screen()
+
+local noz_arc = ui.arc(scr, {cx=120, cy=120, size=100, value=0,
+    color=CLR_ORANGE, track=CLR_DARK, thickness=10})
+
+local bed_arc = ui.arc(scr, {cx=120, cy=120, size=80, value=0,
+    color=CLR_BLUE, track=CLR_DARK, thickness=8})
+
+local noz_lbl = ui.label(scr, "N --°", {align="center", y=-10, font=20, color=CLR_ORANGE})
+local bed_lbl = ui.label(scr, "B --°", {align="center", y=16,  font=16, color=CLR_BLUE})
+
+sys.on_tick(function(_dt)
+    local noz   = bambu.nozzle_temp()
+    local noz_t = bambu.nozzle_target()
+    local bed   = bambu.bed_temp()
+    local bed_t = bambu.bed_target()
+
+    local function temp_pct(cur, tgt)
+        if tgt <= 0 then return 0 end
+        return math.min(math.floor(cur / tgt * 100), 100)
+    end
+
+    ui.arc_set(noz_arc, temp_pct(noz, noz_t))
+    ui.arc_set(bed_arc, temp_pct(bed, bed_t))
+
+    local at_temp = noz_t > 0 and math.abs(noz - noz_t) < 5
+    ui.arc_color(noz_arc, at_temp and CLR_GREEN or CLR_ORANGE)
+
+    ui.label_set(noz_lbl, string.format("N %.0f°", noz))
+    ui.label_set(bed_lbl, string.format("B %.0f°", bed))
+
+    if bambu.state() == "FINISH" then sys.exit() end
+end)
+```
+
+---
+
 ## Future Plans
 
 - OTA firmware updates

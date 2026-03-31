@@ -12,6 +12,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <math.h>
 
 extern "C" {
 #include "lua.h"
@@ -22,14 +23,33 @@ extern "C" {
 // ---------------------------------------------------------------------------
 //  Internal flags / refs
 // ---------------------------------------------------------------------------
-static bool g_exit_requested = false;
-static int  g_tick_ref       = LUA_NOREF;  // set by sys.on_tick()
+static bool       g_exit_requested = false;
+static int        g_tick_ref       = LUA_NOREF;  // set by sys.on_tick()
+static lua_State* g_L              = nullptr;    // cached for cleanup
 
 // Memory tracking — cleaned up on app exit
 #define MAX_CANVAS_BUFS 8
 static void*      g_canvas_bufs[MAX_CANVAS_BUFS] = {};
 static int        g_canvas_buf_count = 0;
 static lv_obj_t*  g_lua_screen       = nullptr;  // first screen created by app
+
+// sys.every() interval timers
+#define MAX_EVERY_TIMERS 8
+struct EveryTimer {
+    int           lua_ref;
+    unsigned long interval_ms;
+    unsigned long last_ms;
+};
+static EveryTimer g_timers[MAX_EVERY_TIMERS] = {};
+static int        g_timer_count = 0;
+
+// ui.on_tap() deferred event queue
+#define MAX_PENDING_TAPS 4
+#define MAX_TAP_WIDGETS  16
+static int g_pending_taps[MAX_PENDING_TAPS] = {};
+static int g_pending_tap_count = 0;
+static int g_tap_refs[MAX_TAP_WIDGETS] = {};
+static int g_tap_ref_count = 0;
 
 bool sdkExitRequested() { return g_exit_requested; }
 void sdkClearExitFlag()  { g_exit_requested = false; }
@@ -46,11 +66,30 @@ void sdkCleanup() {
     }
     g_canvas_buf_count = 0;
 
-    // Delete the app's LVGL screen (frees all child widgets from LVGL heap)
+    // Schedule deletion of the app's LVGL screen.
+    // lv_obj_del_async defers to the next lv_timer_handler() tick, by which
+    // point setScreenState() has already loaded a different active screen.
+    // Calling lv_obj_del() synchronously on the currently-active screen crashes.
     if (g_lua_screen) {
-        lv_obj_del(g_lua_screen);
+        lv_obj_del_async(g_lua_screen);
         g_lua_screen = nullptr;
     }
+
+    // Unref all interval timer callbacks
+    if (g_L) {
+        for (int i = 0; i < g_timer_count; i++) {
+            if (g_timers[i].lua_ref != LUA_NOREF)
+                luaL_unref(g_L, LUA_REGISTRYINDEX, g_timers[i].lua_ref);
+        }
+        // Unref all tap callbacks
+        for (int i = 0; i < g_tap_ref_count; i++) {
+            if (g_tap_refs[i] != LUA_NOREF)
+                luaL_unref(g_L, LUA_REGISTRYINDEX, g_tap_refs[i]);
+        }
+    }
+    g_timer_count     = 0;
+    g_tap_ref_count   = 0;
+    g_pending_tap_count = 0;
 
     g_exit_requested = false;
     g_tick_ref       = LUA_NOREF;
@@ -241,6 +280,20 @@ static int sys_on_tick(lua_State* L) {
     return 0;
 }
 
+// sys.every(ms, fn) — schedule fn to be called at most once per ms milliseconds
+static int sys_every(lua_State* L) {
+    unsigned long ms = (unsigned long)luaL_checkinteger(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    if (g_timer_count >= MAX_EVERY_TIMERS) {
+        luaL_error(L, "sys.every: max %d timers reached", MAX_EVERY_TIMERS);
+        return 0;
+    }
+    lua_pushvalue(L, 2);
+    int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    g_timers[g_timer_count++] = { ref, ms, (unsigned long)millis() };
+    return 0;
+}
+
 // sys.http_get(url [, timeout_ms]) → body string or nil, err_string
 static int sys_http_get(lua_State* L) {
     const char* url = luaL_checkstring(L, 1);
@@ -383,6 +436,7 @@ static const luaL_Reg sys_lib[] = {
     { "exit",        sys_exit        },
     { "sdk_version", sys_sdk_version },
     { "on_tick",     sys_on_tick     },
+    { "every",       sys_every       },
     { "http_get",    sys_http_get    },
     { "store_set",   sys_store_set   },
     { "store_get",   sys_store_get   },
@@ -405,6 +459,8 @@ static int ui_screen(lua_State* L) {
     lv_obj_set_style_pad_all(scr, 0, LV_PART_MAIN);
     // Track the first screen created — used for cleanup on exit
     if (!g_lua_screen) g_lua_screen = scr;
+    // Show the screen immediately — single lv_scr_load, no separate ui.show() needed
+    lv_scr_load(scr);
     lua_pushlightuserdata(L, scr);
     return 1;
 }
@@ -467,7 +523,7 @@ static int ui_arc(lua_State* L) {
     uint16_t track  = (uint16_t)tbl_int(L, 2, "track",  CLR_TRACK);
     int      cx     = (int)     tbl_int(L, 2, "cx",     120);
     int      cy     = (int)     tbl_int(L, 2, "cy",     120);
-    int      width  = (int)     tbl_int(L, 2, "width",  8);
+    int      width  = (int)     tbl_int(L, 2, "thickness", 8);
     int      start_a= (int)     tbl_int(L, 2, "start",  135);
     int      sweep  = (int)     tbl_int(L, 2, "sweep",  270);
 
@@ -558,28 +614,9 @@ static void _set_opa(lv_obj_t* obj, int32_t v) {
     lv_obj_set_style_opa(obj, (lv_opa_t)v, LV_PART_MAIN);
 }
 
-// ui.animate(handle, opts)
-// opts: prop="opa"|"x"|"y"|"w"|"h"  from=  to=  time=  delay=  repeat=  bounce=
-static int ui_animate(lua_State* L) {
-    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
-    if (!obj || !lua_istable(L, 2)) return 0;
-
-    const char* prop  = tbl_str(L, 2, "prop",   "opa");
-    int from          = (int)tbl_int(L, 2, "from",   0);
-    int to            = (int)tbl_int(L, 2, "to",   255);
-    int time_ms       = (int)tbl_int(L, 2, "time", 1000);
-    int delay_ms      = (int)tbl_int(L, 2, "delay",  0);
-    bool rep          = tbl_bool(L, 2, "repeat", false);
-    bool bounce       = tbl_bool(L, 2, "bounce", false);
-
-    lv_anim_exec_xcb_t exec_cb = nullptr;
-    if      (strcmp(prop, "opa") == 0) exec_cb = (lv_anim_exec_xcb_t)_set_opa;
-    else if (strcmp(prop, "x")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_x;
-    else if (strcmp(prop, "y")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_y;
-    else if (strcmp(prop, "w")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_width;
-    else if (strcmp(prop, "h")   == 0) exec_cb = (lv_anim_exec_xcb_t)lv_obj_set_height;
-    if (!exec_cb) return 0;
-
+static void _start_anim(lv_obj_t* obj, lv_anim_exec_xcb_t exec_cb,
+                        int from, int to, int time_ms, int delay_ms,
+                        bool rep, bool bounce) {
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, obj);
@@ -591,6 +628,39 @@ static int ui_animate(lua_State* L) {
     if (bounce) lv_anim_set_playback_time(&a, time_ms);
     if (rep)    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
     lv_anim_start(&a);
+}
+
+// ui.anim_fade(handle, from, to [, opts])
+// opts: time (ms, default 300), delay (ms, default 0), repeat (bool), bounce (bool)
+static int ui_anim_fade(lua_State* L) {
+    lv_obj_t* obj  = (lv_obj_t*)lua_touserdata(L, 1);
+    int       from = (int)luaL_checkinteger(L, 2);
+    int       to   = (int)luaL_checkinteger(L, 3);
+    if (!obj) return 0;
+    int  time_ms  = lua_istable(L, 4) ? (int)tbl_int(L, 4, "time",   300) : 300;
+    int  delay_ms = lua_istable(L, 4) ? (int)tbl_int(L, 4, "delay",    0) : 0;
+    bool rep      = lua_istable(L, 4) ? tbl_bool(L, 4, "repeat", false)   : false;
+    bool bounce   = lua_istable(L, 4) ? tbl_bool(L, 4, "bounce", false)   : false;
+    _start_anim(obj, (lv_anim_exec_xcb_t)_set_opa, from, to, time_ms, delay_ms, rep, bounce);
+    return 0;
+}
+
+// ui.anim_move(handle, x, y [, opts])
+// Animates widget to absolute position (x, y).
+// opts: time (ms, default 300), delay (ms, default 0), repeat (bool), bounce (bool)
+static int ui_anim_move(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    int       x   = (int)luaL_checkinteger(L, 2);
+    int       y   = (int)luaL_checkinteger(L, 3);
+    if (!obj) return 0;
+    int  time_ms  = lua_istable(L, 4) ? (int)tbl_int(L, 4, "time",   300) : 300;
+    int  delay_ms = lua_istable(L, 4) ? (int)tbl_int(L, 4, "delay",    0) : 0;
+    bool rep      = lua_istable(L, 4) ? tbl_bool(L, 4, "repeat", false)   : false;
+    bool bounce   = lua_istable(L, 4) ? tbl_bool(L, 4, "bounce", false)   : false;
+    int cur_x = lv_obj_get_x(obj);
+    int cur_y = lv_obj_get_y(obj);
+    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_x, cur_x, x, time_ms, delay_ms, rep, bounce);
+    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_y, cur_y, y, time_ms, delay_ms, rep, bounce);
     return 0;
 }
 
@@ -620,7 +690,7 @@ static int ui_canvas(lua_State* L) {
     return 1;
 }
 
-// ui.canvas_line(canvas, x1,y1, x2,y2, color)
+// ui.canvas_line(canvas, x1,y1, x2,y2, color, width)
 static int ui_canvas_line(lua_State* L) {
     lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
     if (!canvas) return 0;
@@ -629,12 +699,13 @@ static int ui_canvas_line(lua_State* L) {
     pts[0].y = (lv_coord_t)luaL_checkinteger(L, 3);
     pts[1].x = (lv_coord_t)luaL_checkinteger(L, 4);
     pts[1].y = (lv_coord_t)luaL_checkinteger(L, 5);
-    uint16_t color = (uint16_t)luaL_optinteger(L, 6, CLR_TEXT);
+    uint16_t color = (uint16_t)luaL_checkinteger(L, 6);
+    int      width = (int)     luaL_checkinteger(L, 7);
 
     lv_draw_line_dsc_t dsc;
     lv_draw_line_dsc_init(&dsc);
     dsc.color = c565(color);
-    dsc.width = 1;
+    dsc.width = (lv_coord_t)(width > 0 ? width : 1);
     lv_canvas_draw_line(canvas, pts, 2, &dsc);
     return 0;
 }
@@ -663,44 +734,72 @@ static int ui_canvas_rect(lua_State* L) {
     return 0;
 }
 
+// Helper: draw an arc as polyline segments using lv_canvas_draw_line.
+// Avoids lv_canvas_draw_arc which uses a fake display context and can
+// corrupt LVGL's refresh state when called outside lv_timer_handler.
+static void canvas_draw_arc_polyline(lv_obj_t* canvas,
+                                     float cx, float cy, float r,
+                                     float a1_deg, float a2_deg,
+                                     lv_color_t color, int width)
+{
+    // Number of segments: more segments = smoother circle.
+    // ~1 segment per 6° gives 60 segments for a full circle — smooth enough.
+    float span = a2_deg - a1_deg;
+    if (span <= 0) span += 360.0f;
+    int segs = (int)(span / 6.0f);
+    if (segs < 2)  segs = 2;
+    if (segs > 64) segs = 64;
+
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color = color;
+    dsc.width = (lv_coord_t)(width > 0 ? width : 1);
+    dsc.opa   = LV_OPA_COVER;
+
+    float step = span / (float)segs;
+    float prev_x = cx + r * cosf((a1_deg)          * (float)M_PI / 180.0f);
+    float prev_y = cy + r * sinf((a1_deg)          * (float)M_PI / 180.0f);
+
+    for (int i = 1; i <= segs; i++) {
+        float a   = a1_deg + step * (float)i;
+        float nx  = cx + r * cosf(a * (float)M_PI / 180.0f);
+        float ny  = cy + r * sinf(a * (float)M_PI / 180.0f);
+        lv_point_t pts[2] = {
+            { (lv_coord_t)prev_x, (lv_coord_t)prev_y },
+            { (lv_coord_t)nx,     (lv_coord_t)ny     }
+        };
+        lv_canvas_draw_line(canvas, pts, 2, &dsc);
+        prev_x = nx;
+        prev_y = ny;
+    }
+}
+
 // ui.canvas_circle(canvas, cx, cy, r, color [, thickness])
 static int ui_canvas_circle(lua_State* L) {
     lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
     if (!canvas) return 0;
-    lv_coord_t cx    = (lv_coord_t)luaL_checkinteger(L, 2);
-    lv_coord_t cy    = (lv_coord_t)luaL_checkinteger(L, 3);
-    lv_coord_t r     = (lv_coord_t)luaL_checkinteger(L, 4);
-    uint16_t   color = (uint16_t)luaL_optinteger(L, 5, CLR_TEXT);
-    int        width = (int)luaL_optinteger(L, 6, 1);
-
-    lv_draw_arc_dsc_t dsc;
-    lv_draw_arc_dsc_init(&dsc);
-    dsc.color = c565(color);
-    dsc.width = width;
-    dsc.opa   = LV_OPA_COVER;
-    lv_canvas_draw_arc(canvas, cx, cy, r, 0, 360, &dsc);
+    float    cx    = (float)luaL_checkinteger(L, 2);
+    float    cy    = (float)luaL_checkinteger(L, 3);
+    float    r     = (float)luaL_checkinteger(L, 4);
+    uint16_t color = (uint16_t)luaL_optinteger(L, 5, CLR_TEXT);
+    int      width = (int)luaL_optinteger(L, 6, 1);
+    canvas_draw_arc_polyline(canvas, cx, cy, r, 0.0f, 360.0f, c565(color), width);
     return 0;
 }
 
 // ui.canvas_arc(canvas, cx, cy, r, a1, a2, color [, thickness])
-// angles in degrees, 0 = right, clockwise
+// angles in degrees, 0 = right (3 o'clock), clockwise
 static int ui_canvas_arc(lua_State* L) {
     lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
     if (!canvas) return 0;
-    lv_coord_t cx    = (lv_coord_t)luaL_checkinteger(L, 2);
-    lv_coord_t cy    = (lv_coord_t)luaL_checkinteger(L, 3);
-    lv_coord_t r     = (lv_coord_t)luaL_checkinteger(L, 4);
-    int32_t    a1    = (int32_t)luaL_checkinteger(L, 5);
-    int32_t    a2    = (int32_t)luaL_checkinteger(L, 6);
-    uint16_t   color = (uint16_t)luaL_optinteger(L, 7, CLR_TEXT);
-    int        width = (int)luaL_optinteger(L, 8, 1);
-
-    lv_draw_arc_dsc_t dsc;
-    lv_draw_arc_dsc_init(&dsc);
-    dsc.color = c565(color);
-    dsc.width = width;
-    dsc.opa   = LV_OPA_COVER;
-    lv_canvas_draw_arc(canvas, cx, cy, r, a1, a2, &dsc);
+    float    cx    = (float)luaL_checkinteger(L, 2);
+    float    cy    = (float)luaL_checkinteger(L, 3);
+    float    r     = (float)luaL_checkinteger(L, 4);
+    float    a1    = (float)luaL_checkinteger(L, 5);
+    float    a2    = (float)luaL_checkinteger(L, 6);
+    uint16_t color = (uint16_t)luaL_optinteger(L, 7, CLR_TEXT);
+    int      width = (int)luaL_optinteger(L, 8, 1);
+    canvas_draw_arc_polyline(canvas, cx, cy, r, a1, a2, c565(color), width);
     return 0;
 }
 
@@ -712,14 +811,42 @@ static int ui_canvas_clear(lua_State* L) {
     return 0;
 }
 
-// ui.show(screen)
-static int ui_show(lua_State* L) {
-    lv_obj_t* scr = (lv_obj_t*)lua_touserdata(L, 1);
-    if (scr) lv_scr_load(scr);
+
+// ui.color(r, g, b) → rgb565 integer  — convert 0-255 RGB to RGB565
+static int ui_color(lua_State* L) {
+    int r = (int)luaL_checkinteger(L, 1);
+    int g = (int)luaL_checkinteger(L, 2);
+    int b = (int)luaL_checkinteger(L, 3);
+    r = r < 0 ? 0 : r > 255 ? 255 : r;
+    g = g < 0 ? 0 : g > 255 ? 255 : g;
+    b = b < 0 ? 0 : b > 255 ? 255 : b;
+    lua_pushinteger(L, ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+    return 1;
+}
+
+// LVGL event callback — enqueues the Lua ref, never calls Lua directly.
+// Called from lv_timer_handler() inside lvglPortTick(), before luaRuntimeTick().
+static void tap_event_cb(lv_event_t* e) {
+    int ref = (int)(intptr_t)lv_event_get_user_data(e);
+    if (g_pending_tap_count < MAX_PENDING_TAPS)
+        g_pending_taps[g_pending_tap_count++] = ref;
+}
+
+// ui.on_tap(widget, fn) — register a tap callback for any widget
+static int ui_on_tap(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    if (!obj) return 0;
+    lua_pushvalue(L, 2);
+    int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(obj, tap_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)ref);
+    if (g_tap_ref_count < MAX_TAP_WIDGETS)
+        g_tap_refs[g_tap_ref_count++] = ref;
     return 0;
 }
 
-// ui.obj_delete(handle) — clean up a widget
+// ui.delete(handle) — clean up a widget
 static int ui_obj_delete(lua_State* L) {
     lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
     if (obj) lv_obj_del(obj);
@@ -727,33 +854,67 @@ static int ui_obj_delete(lua_State* L) {
 }
 
 static const luaL_Reg ui_lib[] = {
-    { "screen",       ui_screen      },
-    { "label",        ui_label       },
-    { "label_set",    ui_label_set   },
-    { "label_color",  ui_label_color },
-    { "arc",          ui_arc         },
-    { "arc_set",      ui_arc_set     },
-    { "arc_color",    ui_arc_color   },
-    { "rect",         ui_rect        },
-    { "rect_set",     ui_rect_set    },
-    { "rect_size",    ui_rect_size   },
-    { "animate",      ui_animate     },
+    { "screen",        ui_screen        },
+    { "label",         ui_label         },
+    { "label_set",     ui_label_set     },
+    { "label_color",   ui_label_color   },
+    { "arc",           ui_arc           },
+    { "arc_set",       ui_arc_set       },
+    { "arc_color",     ui_arc_color     },
+    { "rect",          ui_rect          },
+    { "rect_set",      ui_rect_set      },
+    { "rect_size",     ui_rect_size     },
+    { "anim_fade",     ui_anim_fade     },
+    { "anim_move",     ui_anim_move     },
     { "canvas",        ui_canvas        },
     { "canvas_line",   ui_canvas_line   },
     { "canvas_rect",   ui_canvas_rect   },
     { "canvas_circle", ui_canvas_circle },
     { "canvas_arc",    ui_canvas_arc    },
     { "canvas_clear",  ui_canvas_clear  },
-    { "show",         ui_show        },
-    { "delete",       ui_obj_delete  },
-    { nullptr,        nullptr        }
+    { "color",         ui_color         },
+    { "on_tap",        ui_on_tap        },
+    { "delete",        ui_obj_delete    },
+    { nullptr,         nullptr          }
 };
+
+// ===========================================================================
+//  Exported runtime helpers — called from lua_runtime.cpp each tick
+// ===========================================================================
+
+void sdkTickTimers(lua_State* L) {
+    unsigned long now = (unsigned long)millis();
+    for (int i = 0; i < g_timer_count; i++) {
+        EveryTimer& t = g_timers[i];
+        if (now - t.last_ms >= t.interval_ms) {
+            t.last_ms = now;
+            lua_rawgeti(L, LUA_REGISTRYINDEX, t.lua_ref);
+            if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+                Serial.printf("LuaRuntime: sys.every error: %s\n", lua_tostring(L, -1));
+                lua_pop(L, 1);
+            }
+        }
+    }
+}
+
+void sdkDrainTapQueue(lua_State* L) {
+    int count = g_pending_tap_count;
+    g_pending_tap_count = 0;
+    for (int i = 0; i < count; i++) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, g_pending_taps[i]);
+        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+            Serial.printf("LuaRuntime: on_tap error: %s\n", lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+}
 
 // ===========================================================================
 //  Registration
 // ===========================================================================
 
 void sdkApiRegister(lua_State* L) {
+    g_L              = L;   // cache for cleanup
     g_exit_requested = false;
     g_tick_ref       = LUA_NOREF;
 

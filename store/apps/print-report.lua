@@ -45,6 +45,4 @@ end
 
 ui.label(scr, "Long press to exit", {align="bottom_mid", y=-8, font=14, color=CLR_DIM})
 
-ui.show(scr)
-
 -- Static display — no tick loop needed, long-press exits via launcher
