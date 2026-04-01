@@ -29,6 +29,7 @@ struct MqttConn {
   uint16_t consecutiveFails;  // for exponential backoff
   unsigned long disconnectSince;  // grace period before showing "connecting" screen
   bool wasConnected;              // track connected->disconnected transitions for logging
+  unsigned long stalePushallSentMs; // v2.5: grace period tracking for false-Ready fix
 };
 
 static MqttConn conns[MAX_ACTIVE_PRINTERS];
@@ -728,10 +729,25 @@ static void handleConn(MqttConn& c) {
 
   unsigned long staleMs = isCloudMode(cfg.mode) ? BAMBU_STALE_TIMEOUT * 5 : BAMBU_STALE_TIMEOUT;
   if (s.lastUpdate > 0 && millis() - s.lastUpdate > staleMs) {
-    if (s.printing || strcmp(s.gcodeState, "IDLE") != 0) {
-      s.printing = false;
+    bool isConnected = c.mqtt && c.mqtt->connected();
+    if (s.printing) {
+      // v2.5 false-Ready fix: send a recovery pushall first, wait 30s for response
+      // before actually clearing the printing state (avoids false "Ready" during cloud prints)
+      if (isConnected && c.stalePushallSentMs == 0) {
+        requestPushall(c);
+        c.stalePushallSentMs = millis();
+      } else if (c.stalePushallSentMs == 0 || millis() - c.stalePushallSentMs > 30000) {
+        s.printing = false;
+        strlcpy(s.gcodeState, "IDLE", sizeof(s.gcodeState));
+        c.stalePushallSentMs = 0;
+      }
+    } else if (strcmp(s.gcodeState, "IDLE") != 0) {
       strlcpy(s.gcodeState, "IDLE", sizeof(s.gcodeState));
+      c.stalePushallSentMs = 0;
     }
+  } else {
+    // fresh data arrived — reset grace period tracker
+    c.stalePushallSentMs = 0;
   }
 }
 

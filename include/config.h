@@ -17,7 +17,7 @@
 // =============================================================================
 //  Firmware version
 // =============================================================================
-#define FW_VERSION          "v2.4-ws240"  // ws240 = Waveshare 240×240 fork
+#define FW_VERSION          "v2.5-ws240"  // ws240 = Waveshare 240×240 fork
 
 // =============================================================================
 //  Display
@@ -56,7 +56,7 @@
 // =============================================================================
 #define BAMBU_PORT                  8883
 #define BAMBU_USERNAME              "bblp"
-#define BAMBU_BUFFER_SIZE           16384   // 16KB for full pushall
+#define BAMBU_BUFFER_SIZE           40960   // 40KB — H2 series pushall needs this (v2.5)
 #define BAMBU_RECONNECT_INTERVAL    10000   // 10s between attempts
 #define BAMBU_BACKOFF_PHASE1        5       // first N attempts at normal interval
 #define BAMBU_BACKOFF_PHASE2_MS     60000   // 60s after phase 1 exhausted
