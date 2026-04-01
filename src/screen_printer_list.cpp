@@ -24,7 +24,7 @@ static unsigned long g_enterMs = 0;
 // ---------------------------------------------------------------------------
 static void btn_event_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-    lv_obj_t* btn = lv_event_get_target(e);
+    lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
     for (uint8_t i = 0; i < MAX_ACTIVE_PRINTERS; i++) {
         if (g_btns[i] == btn) { g_selected = (int8_t)i; break; }
     }

@@ -46,7 +46,7 @@ static unsigned long g_lastClockUpdate = 0;
 // ---------------------------------------------------------------------------
 static void tile_event_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-    lv_obj_t* tile = lv_event_get_target(e);
+    lv_obj_t* tile = (lv_obj_t*)lv_event_get_target(e);
     for (uint8_t i = 0; i < LAUNCHER_GRID_SIZE; i++) {
         if (g_tiles[i] == tile) { g_selected = (int8_t)i; break; }
     }

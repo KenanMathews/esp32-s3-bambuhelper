@@ -150,10 +150,11 @@ int main(int argc, char *argv[])
     printf("Script executed successfully — entering display loop\n");
 
     /* Main LVGL event loop */
-    while (1) {
+    while (!sdk_sys_should_exit()) {
         lv_timer_handler();
         usleep(5000); /* 5 ms */
     }
+    printf("Simulator exited cleanly.\n");
 
     /* Unreachable — cleanup shown for completeness */
     lua_close(L);

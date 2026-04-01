@@ -50,6 +50,7 @@ struct StoreEntry {
     uint8_t  sdk_min;
     uint16_t color;
     bool     installed;
+    bool     update_available;   // installed version differs from store version
 };
 
 static lv_obj_t*     g_screen      = nullptr;
@@ -229,16 +230,24 @@ static void buildList() {
         lv_obj_set_style_pad_all(btn, 0, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
 
-        if (entry.installed) {
+        const char* btn_text;
+        if (entry.update_available) {
+            // Update available — orange button, re-installs the newer version
+            lv_obj_set_style_bg_color(btn, c565(CLR_ORANGE), LV_PART_MAIN);
+            lv_obj_add_event_cb(btn, install_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+            btn_text = "Upd";
+        } else if (entry.installed) {
             lv_obj_set_style_bg_color(btn, c565(CLR_RED), LV_PART_MAIN);
             lv_obj_add_event_cb(btn, delete_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+            btn_text = "Del";
         } else {
             lv_obj_set_style_bg_color(btn, c565(CLR_GREEN), LV_PART_MAIN);
             lv_obj_add_event_cb(btn, install_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+            btn_text = "Get";
         }
 
         lv_obj_t* btn_lbl = lv_label_create(btn);
-        lv_label_set_text(btn_lbl, entry.installed ? "Del" : "Get");
+        lv_label_set_text(btn_lbl, btn_text);
         lv_obj_set_style_text_font(btn_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(btn_lbl, c565(CLR_TEXT), LV_PART_MAIN);
         lv_obj_center(btn_lbl);
@@ -280,6 +289,12 @@ static void parseIndex(const String& json) {
         ent.sdk_min   = app["sdk_min"]  | 1;
         ent.color     = (uint16_t)(app["color"].as<unsigned int>());
         ent.installed = isInstalled(ent.id);
+        ent.update_available = false;
+        if (ent.installed) {
+            const AppInfo* inst = appManagerGetAppById(ent.id);
+            if (inst && strcmp(inst->version, ent.version) != 0)
+                ent.update_available = true;
+        }
         if (ent.id[0] && ent.name[0] && ent.script_url[0]) g_entry_count++;
     }
 }

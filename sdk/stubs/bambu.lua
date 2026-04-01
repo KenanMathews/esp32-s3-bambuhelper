@@ -41,6 +41,15 @@ function bambu.job_name() end
 ---@return integer level 0=Silent, 1=Standard, 2=Sport, 3=Ludicrous
 function bambu.speed() end
 
+---Returns the current print sub-stage (stg_cur from MQTT).
+---Returns -1 or 255 when idle (model-dependent), 0 when printing with no active sub-stage.
+---Key values: 1=bed_leveling, 2=heatbed_preheating, 7=heating_hotend,
+---  8=calibrating_extrusion, 13=homing_toolhead, 14=cleaning_nozzle_tip,
+---  19=calibrating_extrusion_flow, 25=calibrating_motor_noise, 29=cooling_chamber.
+---Value is cached — P1/A1 series only send this field when it changes (delta protocol).
+---@return integer stage stg_cur value
+function bambu.print_stage() end
+
 ---Returns the estimated minutes remaining in the current print.
 ---@return integer minutes Remaining time (0 when not printing)
 function bambu.remaining_mins() end

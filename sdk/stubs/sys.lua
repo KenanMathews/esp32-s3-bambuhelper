@@ -24,7 +24,7 @@ function sys.beep(freq, ms) end
 function sys.exit() end
 
 ---Returns the BambuHelper SDK version integer.
----@return integer version SDK version (currently 2)
+---@return integer version SDK version (currently 1)
 function sys.sdk_version() end
 
 ---Register a function to be called every frame.
@@ -34,13 +34,21 @@ function sys.sdk_version() end
 ---@param fn fun(dt: integer) Frame callback. dt is ms since last tick.
 function sys.on_tick(fn) end
 
----Schedule a function to be called at most once per `ms` milliseconds.
+---Schedule a function to be called repeatedly every `ms` milliseconds.
 ---Fires from the tick loop — safe to call any ui.* or sys.* inside.
 ---Requires sys.on_tick() to be registered; timers don't fire in static apps.
 ---Maximum 8 concurrent timers per app.
----@param ms integer Minimum interval between calls in milliseconds
+---@param ms integer Interval between calls in milliseconds
 ---@param fn fun() Callback with no arguments
 function sys.every(ms, fn) end
+
+---Schedule a function to be called once after `ms` milliseconds, then stop.
+---Re-registering the same function before it fires cancels the old timer.
+---Fires from the tick loop — safe to call any ui.* or sys.* inside.
+---Requires sys.on_tick() to be registered; timers don't fire in static apps.
+---@param ms integer Delay in milliseconds
+---@param fn fun() Callback with no arguments
+function sys.after(ms, fn) end
 
 ---Perform an HTTP GET request. **Blocking** — pauses rendering for the duration.
 ---Do not call from inside a tick loop without awareness of the frame-drop impact.

@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "updated": "2026-04-01",
+  "apps": [
+    {
+      "id": "01-hello",
+      "name": "Hello World",
+      "description": "The simplest possible app: a label, a subtitle, and an elapsed-time counter.",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 2016,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/01-hello/app.lua"
+    },
+    {
+      "id": "02-colors-fonts",
+      "name": "Colors & Fonts",
+      "description": "Static showcase of all font sizes, ui.color(), and label alignment.",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 63519,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/02-colors-fonts/app.lua"
+    },
+    {
+      "id": "03-clock",
+      "name": "Digital Clock",
+      "description": "Live digital clock with date using sys.time() and sys.every().",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 2047,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/03-clock/app.lua"
+    },
+    {
+      "id": "04-animations",
+      "name": "Animations",
+      "description": "Interactive tour of all animation types and every easing curve. Tap to advance.",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 64480,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/04-animations/app.lua"
+    },
+    {
+      "id": "05-canvas-clock",
+      "name": "Canvas Clock",
+      "description": "Analog clock face drawn entirely with canvas primitives. Updates every second.",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 18960,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/05-canvas-clock/app.lua"
+    },
+    {
+      "id": "06-tap-counter",
+      "name": "Tap Counter",
+      "description": "Tap a button to count. Shows ui.on_tap, anim_size feedback, and persistent storage.",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 65504,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/06-tap-counter/app.lua"
+    },
+    {
+      "id": "07-printer-status",
+      "name": "Printer Status",
+      "description": "Comprehensive bambu.* API showcase: state, progress, temps, fans, layers, AMS.",
+      "author": "BambuHelper",
+      "category": "demo",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 13535,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/07-printer-status/app.lua"
+    },
+    {
+      "id": "basic-app",
+      "name": "Basic Status",
+      "description": "Shows printer name, progress arc, nozzle and bed temps",
+      "author": "BambuHelper Team",
+      "category": "display",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 2016,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/sdk/demos/basic-app/app.lua"
+    }
+  ]
+}

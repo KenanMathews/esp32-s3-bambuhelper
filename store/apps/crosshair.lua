@@ -1,6 +1,6 @@
 -- @name Crosshair
 -- @color 0x07E0
--- @sdk_min 2
+-- @sdk_min 1
 -- @version 1.0
 -- @author BambuHelper
 -- @category monitor

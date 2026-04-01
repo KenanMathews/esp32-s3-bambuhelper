@@ -75,7 +75,8 @@ static lv_obj_t* centeredLabel(lv_obj_t* parent, const char* text,
 
 // Create an lv_spinner sized and centered with y_ofs
 static lv_obj_t* makeSpinner(lv_obj_t* parent, lv_color_t color, lv_coord_t y_ofs) {
-    lv_obj_t* sp = lv_spinner_create(parent, 1000, 60);
+    lv_obj_t* sp = lv_spinner_create(parent);
+    lv_spinner_set_anim_params(sp, 1000, 60);
     lv_obj_set_size(sp, 52, 52);
     lv_obj_align(sp, LV_ALIGN_CENTER, 0, y_ofs);
     lv_obj_set_style_arc_color(sp, color, LV_PART_INDICATOR);

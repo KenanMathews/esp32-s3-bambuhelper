@@ -13,14 +13,17 @@ static uint8_t  s_count = 0;
 
 // ---------------------------------------------------------------------------
 //  parseHeaders — read up to 256 bytes from file, extract comment headers
-//  Supported: -- @name, -- @color, -- @sdk_min
+//  Supported: -- @name (required), -- @version, -- @color, -- @sdk_min
+//  Global defaults apply for all optional fields when the tag is absent.
+//  Returns false if @name is missing (app must be rejected).
 // ---------------------------------------------------------------------------
-static void parseHeaders(const char* id, const uint8_t* buf, size_t len, AppInfo* out) {
-    // Default values
-    strlcpy(out->id, id, APP_ID_LEN);
-    strlcpy(out->name, id, APP_NAME_LEN);   // fallback: use filename
+static bool parseHeaders(const char* id, const uint8_t* buf, size_t len, AppInfo* out) {
+    // Default values — all optional fields have a sensible fallback
+    strlcpy(out->id,      id,    APP_ID_LEN);
+    strlcpy(out->name,    "",    APP_NAME_LEN);    // empty until @name found
+    strlcpy(out->version, "1.0", APP_VERSION_LEN); // default version
     out->color   = CLR_BTN;
-    out->sdk_min = 1;
+    out->sdk_min = 1;                               // default: current SDK
 
     // Work on a null-terminated copy
     char tmp[257];
@@ -37,28 +40,39 @@ static void parseHeaders(const char* id, const uint8_t* buf, size_t len, AppInfo
         return p;
     };
 
-    // @name
+    // Helper to copy a tag value into a fixed buffer, stopping at newline
+    auto copyVal = [](const char* v, char* dst, uint8_t dstLen) {
+        uint8_t i = 0;
+        while (v[i] && v[i] != '\n' && v[i] != '\r' && i < dstLen - 1) {
+            dst[i] = v[i]; i++;
+        }
+        dst[i] = '\0';
+        return i;
+    };
+
+    // @name (mandatory)
     const char* v = findTag("-- @name");
     if (v) {
-        char nameBuf[APP_NAME_LEN];
-        uint8_t i = 0;
-        while (v[i] && v[i] != '\n' && v[i] != '\r' && i < APP_NAME_LEN - 1) {
-            nameBuf[i] = v[i]; i++;
-        }
-        nameBuf[i] = '\0';
-        if (i > 0) strlcpy(out->name, nameBuf, APP_NAME_LEN);
+        char buf2[APP_NAME_LEN];
+        if (copyVal(v, buf2, APP_NAME_LEN) > 0)
+            strlcpy(out->name, buf2, APP_NAME_LEN);
+    }
+    if (out->name[0] == '\0') return false;   // @name missing — reject
+
+    // @version
+    v = findTag("-- @version");
+    if (v) {
+        char buf2[APP_VERSION_LEN];
+        if (copyVal(v, buf2, APP_VERSION_LEN) > 0)
+            strlcpy(out->version, buf2, APP_VERSION_LEN);
     }
 
     // @color
     v = findTag("-- @color");
     if (v) {
         char colBuf[12];
-        uint8_t i = 0;
-        while (v[i] && v[i] != '\n' && v[i] != '\r' && i < 11) {
-            colBuf[i] = v[i]; i++;
-        }
-        colBuf[i] = '\0';
-        if (i > 0) out->color = (uint16_t)strtol(colBuf, nullptr, 16 /* auto-detect 0x */);
+        if (copyVal(v, colBuf, sizeof(colBuf)) > 0)
+            out->color = (uint16_t)strtol(colBuf, nullptr, 0 /* auto-detect 0x */);
     }
 
     // @sdk_min
@@ -66,6 +80,8 @@ static void parseHeaders(const char* id, const uint8_t* buf, size_t len, AppInfo
     if (v) {
         out->sdk_min = (uint8_t)atoi(v);
     }
+
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,10 +122,13 @@ void appManagerInit() {
                 uint8_t headBuf[256];
                 size_t  readLen = entry.read(headBuf, sizeof(headBuf));
 
-                parseHeaders(id, headBuf, readLen, &s_apps[s_count]);
-                Serial.printf("AppManager: found app '%s' (%s)\n",
-                              s_apps[s_count].name, id);
-                s_count++;
+                if (!parseHeaders(id, headBuf, readLen, &s_apps[s_count])) {
+                    Serial.printf("AppManager: skipped '%s' (missing @name)\n", id);
+                } else {
+                    Serial.printf("AppManager: found app '%s' v%s (%s)\n",
+                                  s_apps[s_count].name, s_apps[s_count].version, id);
+                    s_count++;
+                }
             }
         }
         entry.close();
@@ -133,6 +152,16 @@ uint8_t appManagerCount() {
 const AppInfo* appManagerGetApp(uint8_t index) {
     if (index >= s_count) return nullptr;
     return &s_apps[index];
+}
+
+// ---------------------------------------------------------------------------
+//  appManagerGetAppById
+// ---------------------------------------------------------------------------
+const AppInfo* appManagerGetAppById(const char* id) {
+    for (uint8_t i = 0; i < s_count; i++) {
+        if (strcmp(s_apps[i].id, id) == 0) return &s_apps[i];
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------

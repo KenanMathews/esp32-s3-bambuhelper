@@ -154,7 +154,7 @@ static lv_obj_t* makeArc(lv_obj_t* parent,
 
     // Remove knob
     lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_obj_set_style_size(arc, 0, LV_PART_KNOB);
+    lv_obj_set_style_size(arc, 0, 0, LV_PART_KNOB);
     lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
 
     // Track (background arc)

@@ -71,7 +71,7 @@ void sdkCleanup() {
     // point setScreenState() has already loaded a different active screen.
     // Calling lv_obj_del() synchronously on the currently-active screen crashes.
     if (g_lua_screen) {
-        lv_obj_del_async(g_lua_screen);
+        lv_obj_delete_async(g_lua_screen);
         g_lua_screen = nullptr;
     }
 
@@ -180,6 +180,8 @@ static int bambu_job_name(lua_State* L) {
     lua_pushstring(L, displayedPrinter().state.subtaskName); return 1; }
 static int bambu_speed(lua_State* L) {
     lua_pushinteger(L, displayedPrinter().state.speedLevel); return 1; }
+static int bambu_print_stage(lua_State* L) {
+    lua_pushinteger(L, displayedPrinter().state.printStage); return 1; }
 static int bambu_fan_part(lua_State* L) {
     lua_pushinteger(L, displayedPrinter().state.coolingFanPct); return 1; }
 static int bambu_fan_aux(lua_State* L) {
@@ -235,6 +237,7 @@ static const luaL_Reg bambu_lib[] = {
     { "total_layers",   bambu_total_layers   },
     { "job_name",       bambu_job_name       },
     { "speed",          bambu_speed          },
+    { "print_stage",    bambu_print_stage    },
     { "fan_part",       bambu_fan_part       },
     { "fan_aux",        bambu_fan_aux        },
     { "fan_chamber",    bambu_fan_chamber    },
@@ -614,9 +617,33 @@ static void _set_opa(lv_obj_t* obj, int32_t v) {
     lv_obj_set_style_opa(obj, (lv_opa_t)v, LV_PART_MAIN);
 }
 
+// Arc value wrapper — lv_arc_set_value takes int16_t
+static void _set_arc_val(lv_obj_t* obj, int32_t v) {
+    lv_arc_set_value(obj, (int16_t)v);
+}
+
+static lv_anim_path_cb_t _resolve_easing(const char* s) {
+    if (!s || strcmp(s, "ease_in_out") == 0) return lv_anim_path_ease_in_out;
+    if (strcmp(s, "linear")    == 0) return lv_anim_path_linear;
+    if (strcmp(s, "ease_in")   == 0) return lv_anim_path_ease_in;
+    if (strcmp(s, "ease_out")  == 0) return lv_anim_path_ease_out;
+    if (strcmp(s, "overshoot") == 0) return lv_anim_path_overshoot;
+    if (strcmp(s, "bounce")    == 0) return lv_anim_path_bounce;
+    if (strcmp(s, "step")      == 0) return lv_anim_path_step;
+    return lv_anim_path_ease_in_out;
+}
+
+static lv_anim_path_cb_t tbl_easing(lua_State* L, int idx) {
+    lua_getfield(L, idx, "easing");
+    const char* s = lua_isstring(L, -1) ? lua_tostring(L, -1) : NULL;
+    lv_anim_path_cb_t cb = _resolve_easing(s);
+    lua_pop(L, 1);
+    return cb;
+}
+
 static void _start_anim(lv_obj_t* obj, lv_anim_exec_xcb_t exec_cb,
                         int from, int to, int time_ms, int delay_ms,
-                        bool rep, bool bounce) {
+                        bool rep, bool bounce, lv_anim_path_cb_t path_cb) {
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, obj);
@@ -624,65 +651,117 @@ static void _start_anim(lv_obj_t* obj, lv_anim_exec_xcb_t exec_cb,
     lv_anim_set_values(&a, from, to);
     lv_anim_set_time(&a, time_ms);
     lv_anim_set_delay(&a, delay_ms);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&a, path_cb);
     if (bounce) lv_anim_set_playback_time(&a, time_ms);
     if (rep)    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
     lv_anim_start(&a);
 }
 
 // ui.anim_fade(handle, from, to [, opts])
-// opts: time (ms, default 300), delay (ms, default 0), repeat (bool), bounce (bool)
+// opts: time, delay, repeat, bounce, easing
 static int ui_anim_fade(lua_State* L) {
     lv_obj_t* obj  = (lv_obj_t*)lua_touserdata(L, 1);
     int       from = (int)luaL_checkinteger(L, 2);
     int       to   = (int)luaL_checkinteger(L, 3);
     if (!obj) return 0;
-    int  time_ms  = lua_istable(L, 4) ? (int)tbl_int(L, 4, "time",   300) : 300;
-    int  delay_ms = lua_istable(L, 4) ? (int)tbl_int(L, 4, "delay",    0) : 0;
-    bool rep      = lua_istable(L, 4) ? tbl_bool(L, 4, "repeat", false)   : false;
-    bool bounce   = lua_istable(L, 4) ? tbl_bool(L, 4, "bounce", false)   : false;
-    _start_anim(obj, (lv_anim_exec_xcb_t)_set_opa, from, to, time_ms, delay_ms, rep, bounce);
+    bool tbl = lua_istable(L, 4);
+    int  time_ms  = tbl ? (int)tbl_int(L, 4, "time",   300) : 300;
+    int  delay_ms = tbl ? (int)tbl_int(L, 4, "delay",    0) : 0;
+    bool rep      = tbl ? tbl_bool(L, 4, "repeat", false)   : false;
+    bool bounce   = tbl ? tbl_bool(L, 4, "bounce", false)   : false;
+    lv_anim_path_cb_t path = tbl ? tbl_easing(L, 4) : lv_anim_path_ease_in_out;
+    _start_anim(obj, (lv_anim_exec_xcb_t)_set_opa, from, to, time_ms, delay_ms, rep, bounce, path);
     return 0;
 }
 
 // ui.anim_move(handle, x, y [, opts])
-// Animates widget to absolute position (x, y).
-// opts: time (ms, default 300), delay (ms, default 0), repeat (bool), bounce (bool)
+// opts: time, delay, repeat, bounce, easing
 static int ui_anim_move(lua_State* L) {
     lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
     int       x   = (int)luaL_checkinteger(L, 2);
     int       y   = (int)luaL_checkinteger(L, 3);
     if (!obj) return 0;
-    int  time_ms  = lua_istable(L, 4) ? (int)tbl_int(L, 4, "time",   300) : 300;
-    int  delay_ms = lua_istable(L, 4) ? (int)tbl_int(L, 4, "delay",    0) : 0;
-    bool rep      = lua_istable(L, 4) ? tbl_bool(L, 4, "repeat", false)   : false;
-    bool bounce   = lua_istable(L, 4) ? tbl_bool(L, 4, "bounce", false)   : false;
+    bool tbl = lua_istable(L, 4);
+    int  time_ms  = tbl ? (int)tbl_int(L, 4, "time",   300) : 300;
+    int  delay_ms = tbl ? (int)tbl_int(L, 4, "delay",    0) : 0;
+    bool rep      = tbl ? tbl_bool(L, 4, "repeat", false)   : false;
+    bool bounce   = tbl ? tbl_bool(L, 4, "bounce", false)   : false;
+    lv_anim_path_cb_t path = tbl ? tbl_easing(L, 4) : lv_anim_path_ease_in_out;
     int cur_x = lv_obj_get_x(obj);
     int cur_y = lv_obj_get_y(obj);
-    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_x, cur_x, x, time_ms, delay_ms, rep, bounce);
-    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_y, cur_y, y, time_ms, delay_ms, rep, bounce);
+    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_x, cur_x, x, time_ms, delay_ms, rep, bounce, path);
+    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_y, cur_y, y, time_ms, delay_ms, rep, bounce, path);
     return 0;
 }
 
-// ui.canvas(parent, w, h) → handle  (draws into PSRAM buffer)
+// ui.anim_stop(handle) — cancel all running animations on a widget
+static int ui_anim_stop(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    if (obj) lv_anim_del(obj, NULL);
+    return 0;
+}
+
+// ui.anim_arc(handle, from, to [, opts]) — animate arc value 0–100
+// opts: time (default 500), delay, repeat, bounce, easing
+static int ui_anim_arc(lua_State* L) {
+    lv_obj_t* obj  = (lv_obj_t*)lua_touserdata(L, 1);
+    int       from = (int)luaL_checkinteger(L, 2);
+    int       to   = (int)luaL_checkinteger(L, 3);
+    if (!obj) return 0;
+    bool tbl = lua_istable(L, 4);
+    int  time_ms  = tbl ? (int)tbl_int(L, 4, "time",   500) : 500;
+    int  delay_ms = tbl ? (int)tbl_int(L, 4, "delay",    0) : 0;
+    bool rep      = tbl ? tbl_bool(L, 4, "repeat", false)   : false;
+    bool bounce   = tbl ? tbl_bool(L, 4, "bounce", false)   : false;
+    lv_anim_path_cb_t path = tbl ? tbl_easing(L, 4) : lv_anim_path_ease_in_out;
+    _start_anim(obj, (lv_anim_exec_xcb_t)_set_arc_val, from, to, time_ms, delay_ms, rep, bounce, path);
+    return 0;
+}
+
+// ui.anim_size(handle, w, h [, opts]) — animate widget dimensions
+// opts: time (default 300), delay, repeat, bounce, easing
+static int ui_anim_size(lua_State* L) {
+    lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
+    int       w   = (int)luaL_checkinteger(L, 2);
+    int       h   = (int)luaL_checkinteger(L, 3);
+    if (!obj) return 0;
+    bool tbl = lua_istable(L, 4);
+    int  time_ms  = tbl ? (int)tbl_int(L, 4, "time",   300) : 300;
+    int  delay_ms = tbl ? (int)tbl_int(L, 4, "delay",    0) : 0;
+    bool rep      = tbl ? tbl_bool(L, 4, "repeat", false)   : false;
+    bool bounce   = tbl ? tbl_bool(L, 4, "bounce", false)   : false;
+    lv_anim_path_cb_t path = tbl ? tbl_easing(L, 4) : lv_anim_path_ease_in_out;
+    int cur_w = lv_obj_get_width(obj);
+    int cur_h = lv_obj_get_height(obj);
+    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_width,  cur_w, w, time_ms, delay_ms, rep, bounce, path);
+    _start_anim(obj, (lv_anim_exec_xcb_t)lv_obj_set_height, cur_h, h, time_ms, delay_ms, rep, bounce, path);
+    return 0;
+}
+
+// LVGL 9 layer-based canvas draw helpers
+#define CANVAS_LAYER_BEGIN(canvas, layer) \
+    lv_layer_t layer; lv_canvas_init_layer(canvas, &layer)
+#define CANVAS_LAYER_END(canvas, layer) \
+    lv_canvas_finish_layer(canvas, &layer)
+
+// ui.canvas(parent, w, h [,x ,y]) → handle  (draws into PSRAM buffer)
 static int ui_canvas(lua_State* L) {
     lv_obj_t* parent = (lv_obj_t*)lua_touserdata(L, 1);
     int w = (int)luaL_checkinteger(L, 2);
     int h = (int)luaL_checkinteger(L, 3);
-    // optional x, y position (default: 0, 0)
     int x = (int)luaL_optinteger(L, 4, 0);
     int y = (int)luaL_optinteger(L, 5, 0);
     if (!parent || w <= 0 || h <= 0) return 0;
 
-    size_t buf_size = LV_CANVAS_BUF_SIZE_TRUE_COLOR(w, h);
+    uint32_t stride   = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB565);
+    size_t   buf_size = stride * h;
     void* buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!buf) { lua_pushnil(L); return 1; }
-    // Track for cleanup on app exit
     if (g_canvas_buf_count < MAX_CANVAS_BUFS)
         g_canvas_bufs[g_canvas_buf_count++] = buf;
 
     lv_obj_t* canvas = lv_canvas_create(parent);
-    lv_canvas_set_buffer(canvas, buf, w, h, LV_IMG_CF_TRUE_COLOR);
+    lv_canvas_set_buffer(canvas, buf, w, h, LV_COLOR_FORMAT_RGB565);
     lv_canvas_fill_bg(canvas, c565(CLR_BG), LV_OPA_COVER);
     lv_obj_set_style_pad_all(canvas, 0, LV_PART_MAIN);
     lv_obj_set_pos(canvas, x, y);
@@ -694,19 +773,18 @@ static int ui_canvas(lua_State* L) {
 static int ui_canvas_line(lua_State* L) {
     lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
     if (!canvas) return 0;
-    lv_point_t pts[2];
-    pts[0].x = (lv_coord_t)luaL_checkinteger(L, 2);
-    pts[0].y = (lv_coord_t)luaL_checkinteger(L, 3);
-    pts[1].x = (lv_coord_t)luaL_checkinteger(L, 4);
-    pts[1].y = (lv_coord_t)luaL_checkinteger(L, 5);
-    uint16_t color = (uint16_t)luaL_checkinteger(L, 6);
-    int      width = (int)     luaL_checkinteger(L, 7);
-
     lv_draw_line_dsc_t dsc;
     lv_draw_line_dsc_init(&dsc);
-    dsc.color = c565(color);
-    dsc.width = (lv_coord_t)(width > 0 ? width : 1);
-    lv_canvas_draw_line(canvas, pts, 2, &dsc);
+    dsc.color = c565((uint16_t)luaL_checkinteger(L, 6));
+    dsc.width = (int32_t)(luaL_checkinteger(L, 7) > 0 ? luaL_checkinteger(L, 7) : 1);
+    dsc.opa   = LV_OPA_COVER;
+    dsc.p1.x  = (lv_value_precise_t)luaL_checkinteger(L, 2);
+    dsc.p1.y  = (lv_value_precise_t)luaL_checkinteger(L, 3);
+    dsc.p2.x  = (lv_value_precise_t)luaL_checkinteger(L, 4);
+    dsc.p2.y  = (lv_value_precise_t)luaL_checkinteger(L, 5);
+    CANVAS_LAYER_BEGIN(canvas, layer);
+    lv_draw_line(&layer, &dsc);
+    CANVAS_LAYER_END(canvas, layer);
     return 0;
 }
 
@@ -714,36 +792,27 @@ static int ui_canvas_line(lua_State* L) {
 static int ui_canvas_rect(lua_State* L) {
     lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
     if (!canvas) return 0;
-    lv_area_t area;
-    area.x1 = (lv_coord_t)luaL_checkinteger(L, 2);
-    area.y1 = (lv_coord_t)luaL_checkinteger(L, 3);
-    int w    = (int)luaL_checkinteger(L, 4);
-    int h    = (int)luaL_checkinteger(L, 5);
-    area.x2  = area.x1 + w - 1;
-    area.y2  = area.y1 + h - 1;
-    uint16_t color = (uint16_t)luaL_optinteger(L, 6, CLR_BTN);
-    int radius     = (int)luaL_optinteger(L, 7, 0);
-
+    int x = (int)luaL_checkinteger(L, 2), y = (int)luaL_checkinteger(L, 3);
+    int w = (int)luaL_checkinteger(L, 4), h = (int)luaL_checkinteger(L, 5);
     lv_draw_rect_dsc_t dsc;
     lv_draw_rect_dsc_init(&dsc);
-    dsc.bg_color  = c565(color);
-    dsc.bg_opa    = LV_OPA_COVER;
-    dsc.radius    = radius;
+    dsc.bg_color     = c565((uint16_t)luaL_optinteger(L, 6, CLR_BTN));
+    dsc.bg_opa       = LV_OPA_COVER;
+    dsc.radius       = (int32_t)luaL_optinteger(L, 7, 0);
     dsc.border_width = 0;
-    lv_canvas_draw_rect(canvas, area.x1, area.y1, w, h, &dsc);
+    lv_area_t area   = { x, y, x + w - 1, y + h - 1 };
+    CANVAS_LAYER_BEGIN(canvas, layer);
+    lv_draw_rect(&layer, &dsc, &area);
+    CANVAS_LAYER_END(canvas, layer);
     return 0;
 }
 
-// Helper: draw an arc as polyline segments using lv_canvas_draw_line.
-// Avoids lv_canvas_draw_arc which uses a fake display context and can
-// corrupt LVGL's refresh state when called outside lv_timer_handler.
+// Helper: draw an arc as polyline segments using the LVGL 9 layer API.
 static void canvas_draw_arc_polyline(lv_obj_t* canvas,
                                      float cx, float cy, float r,
                                      float a1_deg, float a2_deg,
                                      lv_color_t color, int width)
 {
-    // Number of segments: more segments = smoother circle.
-    // ~1 segment per 6° gives 60 segments for a full circle — smooth enough.
     float span = a2_deg - a1_deg;
     if (span <= 0) span += 360.0f;
     int segs = (int)(span / 6.0f);
@@ -753,22 +822,23 @@ static void canvas_draw_arc_polyline(lv_obj_t* canvas,
     lv_draw_line_dsc_t dsc;
     lv_draw_line_dsc_init(&dsc);
     dsc.color = color;
-    dsc.width = (lv_coord_t)(width > 0 ? width : 1);
+    dsc.width = (int32_t)(width > 0 ? width : 1);
     dsc.opa   = LV_OPA_COVER;
 
-    float step = span / (float)segs;
-    float prev_x = cx + r * cosf((a1_deg)          * (float)M_PI / 180.0f);
-    float prev_y = cy + r * sinf((a1_deg)          * (float)M_PI / 180.0f);
-
+    float step   = span / (float)segs;
+    float prev_x = cx + r * cosf(a1_deg * (float)M_PI / 180.0f);
+    float prev_y = cy + r * sinf(a1_deg * (float)M_PI / 180.0f);
     for (int i = 1; i <= segs; i++) {
-        float a   = a1_deg + step * (float)i;
-        float nx  = cx + r * cosf(a * (float)M_PI / 180.0f);
-        float ny  = cy + r * sinf(a * (float)M_PI / 180.0f);
-        lv_point_t pts[2] = {
-            { (lv_coord_t)prev_x, (lv_coord_t)prev_y },
-            { (lv_coord_t)nx,     (lv_coord_t)ny     }
-        };
-        lv_canvas_draw_line(canvas, pts, 2, &dsc);
+        float a  = a1_deg + step * (float)i;
+        float nx = cx + r * cosf(a * (float)M_PI / 180.0f);
+        float ny = cy + r * sinf(a * (float)M_PI / 180.0f);
+        dsc.p1.x = (lv_value_precise_t)prev_x;
+        dsc.p1.y = (lv_value_precise_t)prev_y;
+        dsc.p2.x = (lv_value_precise_t)nx;
+        dsc.p2.y = (lv_value_precise_t)ny;
+        CANVAS_LAYER_BEGIN(canvas, layer);
+        lv_draw_line(&layer, &dsc);
+        CANVAS_LAYER_END(canvas, layer);
         prev_x = nx;
         prev_y = ny;
     }
@@ -800,6 +870,75 @@ static int ui_canvas_arc(lua_State* L) {
     uint16_t color = (uint16_t)luaL_optinteger(L, 7, CLR_TEXT);
     int      width = (int)luaL_optinteger(L, 8, 1);
     canvas_draw_arc_polyline(canvas, cx, cy, r, a1, a2, c565(color), width);
+    return 0;
+}
+
+// ui.canvas_polyline(canvas, points, color, width)
+// points: flat Lua table {x1,y1, x2,y2, ...}
+static int ui_canvas_polyline(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!canvas) return 0;
+    luaL_checktype(L, 2, LUA_TTABLE);
+    uint16_t color = (uint16_t)luaL_optinteger(L, 3, CLR_TEXT);
+    int      width = (int)luaL_optinteger(L, 4, 1);
+    int n = (int)lua_rawlen(L, 2), npts = n / 2;
+    if (npts < 2) return 0;
+
+    lv_point_precise_t stack_pts[64];
+    lv_point_precise_t *pts = (npts <= 64) ? stack_pts
+        : (lv_point_precise_t*)malloc(npts * sizeof(lv_point_precise_t));
+    if (!pts) return 0;
+    for (int i = 0; i < npts; i++) {
+        lua_rawgeti(L, 2, i*2+1); pts[i].x = (lv_value_precise_t)lua_tointeger(L, -1); lua_pop(L, 1);
+        lua_rawgeti(L, 2, i*2+2); pts[i].y = (lv_value_precise_t)lua_tointeger(L, -1); lua_pop(L, 1);
+    }
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color = c565(color);
+    dsc.width = (int32_t)(width > 0 ? width : 1);
+    dsc.opa   = LV_OPA_COVER;
+    for (int i = 0; i < npts - 1; i++) {
+        dsc.p1 = pts[i]; dsc.p2 = pts[i + 1];
+        CANVAS_LAYER_BEGIN(canvas, layer);
+        lv_draw_line(&layer, &dsc);
+        CANVAS_LAYER_END(canvas, layer);
+    }
+    if (pts != stack_pts) free(pts);
+    return 0;
+}
+
+// ui.canvas_bezier(canvas, x0,y0, cx1,cy1, cx2,cy2, x1,y1 [,color, width, steps])
+// Cubic Bezier via lv_bezier3 sampling.
+static int ui_canvas_bezier(lua_State* L) {
+    lv_obj_t* canvas = (lv_obj_t*)lua_touserdata(L, 1);
+    if (!canvas) return 0;
+    int x0  = (int)luaL_checkinteger(L, 2),  y0  = (int)luaL_checkinteger(L, 3);
+    int cx1 = (int)luaL_checkinteger(L, 4),  cy1 = (int)luaL_checkinteger(L, 5);
+    int cx2 = (int)luaL_checkinteger(L, 6),  cy2 = (int)luaL_checkinteger(L, 7);
+    int x1  = (int)luaL_checkinteger(L, 8),  y1  = (int)luaL_checkinteger(L, 9);
+    uint16_t color = (uint16_t)luaL_optinteger(L, 10, CLR_TEXT);
+    int      width = (int)luaL_optinteger(L, 11, 1);
+    int      steps = (int)luaL_optinteger(L, 12, 20);
+    if (steps < 2)  steps = 2;
+    if (steps > 64) steps = 64;
+
+    lv_point_precise_t pts[65];
+    for (int i = 0; i <= steps; i++) {
+        uint32_t t = (uint32_t)(i * 1024 / steps);
+        pts[i].x = (lv_value_precise_t)lv_bezier3(t, x0, cx1, cx2, x1);
+        pts[i].y = (lv_value_precise_t)lv_bezier3(t, y0, cy1, cy2, y1);
+    }
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color = c565(color);
+    dsc.width = (int32_t)(width > 0 ? width : 1);
+    dsc.opa   = LV_OPA_COVER;
+    for (int i = 0; i < steps; i++) {
+        dsc.p1 = pts[i]; dsc.p2 = pts[i + 1];
+        CANVAS_LAYER_BEGIN(canvas, layer);
+        lv_draw_line(&layer, &dsc);
+        CANVAS_LAYER_END(canvas, layer);
+    }
     return 0;
 }
 
@@ -849,7 +988,7 @@ static int ui_on_tap(lua_State* L) {
 // ui.delete(handle) — clean up a widget
 static int ui_obj_delete(lua_State* L) {
     lv_obj_t* obj = (lv_obj_t*)lua_touserdata(L, 1);
-    if (obj) lv_obj_del(obj);
+    if (obj) lv_obj_delete(obj);
     return 0;
 }
 
@@ -866,12 +1005,17 @@ static const luaL_Reg ui_lib[] = {
     { "rect_size",     ui_rect_size     },
     { "anim_fade",     ui_anim_fade     },
     { "anim_move",     ui_anim_move     },
+    { "anim_stop",     ui_anim_stop     },
+    { "anim_arc",      ui_anim_arc      },
+    { "anim_size",     ui_anim_size     },
     { "canvas",        ui_canvas        },
     { "canvas_line",   ui_canvas_line   },
     { "canvas_rect",   ui_canvas_rect   },
-    { "canvas_circle", ui_canvas_circle },
-    { "canvas_arc",    ui_canvas_arc    },
-    { "canvas_clear",  ui_canvas_clear  },
+    { "canvas_circle",   ui_canvas_circle   },
+    { "canvas_arc",      ui_canvas_arc      },
+    { "canvas_polyline", ui_canvas_polyline },
+    { "canvas_bezier",   ui_canvas_bezier   },
+    { "canvas_clear",    ui_canvas_clear    },
     { "color",         ui_color         },
     { "on_tap",        ui_on_tap        },
     { "delete",        ui_obj_delete    },

@@ -1,6 +1,6 @@
 -- @name Layer Timeline
 -- @color 0x0228
--- @sdk_min 2
+-- @sdk_min 1
 -- @version 1.0
 -- @author BambuHelper
 -- @category monitor

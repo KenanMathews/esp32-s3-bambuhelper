@@ -191,6 +191,7 @@ static void parseMqttPayload(byte* payload, unsigned int length,
   pf["heatbreak_fan_speed"] = true;
   pf["wifi_signal"] = true;
   pf["spd_lvl"] = true;
+  pf["stg_cur"] = true;
   // Note: H2D/H2C extruder data is parsed separately from raw payload (see below)
 
   JsonDocument doc;
@@ -453,6 +454,15 @@ static void parseMqttPayload(byte* payload, unsigned int length,
   if (print["spd_lvl"].is<int>())
     s.speedLevel = print["spd_lvl"].as<int>();
 
+  // stg_cur: granular print sub-stage (flow cal, bed leveling, homing, etc.)
+  // Only update when present — P1/A1 send delta-only payloads.
+  if (print["stg_cur"].is<int>())
+    s.printStage = (int16_t)print["stg_cur"].as<int>();
+
+  // Boot-state guard: P1/A1 incorrectly report stg_cur=0 on first connect when idle
+  if (strcmp(s.gcodeState, "IDLE") == 0 && s.printStage == 0)
+    s.printStage = 255;
+
   // Door sensor (H2 series): stat field bit 0x00800000
   if (print["stat"].is<const char*>()) {
     uint32_t statVal = strtoul(print["stat"].as<const char*>(), nullptr, 16);
@@ -681,6 +691,8 @@ static void handleConn(MqttConn& c) {
       return;  // still within grace period, skip reconnect
     }
     s.connected = false;
+    s.printing  = false;
+    strlcpy(s.gcodeState, "IDLE", sizeof(s.gcodeState));
     reconnectConn(c);
   } else {
     c.disconnectSince = 0;  // reset grace timer on healthy connection

@@ -107,23 +107,53 @@ function ui.rect_size(rect, w, h) end
 ---@param widget userdata Any widget handle
 ---@param from number Starting opacity 0–255 (0 = transparent, 255 = opaque)
 ---@param to number Target opacity 0–255
----@param opts? {time?: number, delay?: number, repeat?: boolean, bounce?: boolean} Options table
+---@param opts? {time?: number, delay?: number, repeat?: boolean, bounce?: boolean, easing?: string} Options table
 ---  - time: Duration in ms. Default: 300
 ---  - delay: Delay before start in ms. Default: 0
 ---  - repeat: Loop indefinitely. Default: false
 ---  - bounce: Reverse animation after reaching `to`. Default: false
+---  - easing: "linear"|"ease_in"|"ease_out"|"ease_in_out"|"overshoot"|"bounce"|"step". Default: "ease_in_out"
 function ui.anim_fade(widget, from, to, opts) end
 
 ---Animate a widget to an absolute position.
 ---@param widget userdata Any widget handle
 ---@param x number Target x position in pixels
 ---@param y number Target y position in pixels
----@param opts? {time?: number, delay?: number, repeat?: boolean, bounce?: boolean} Options table
+---@param opts? {time?: number, delay?: number, repeat?: boolean, bounce?: boolean, easing?: string} Options table
 ---  - time: Duration in ms. Default: 300
 ---  - delay: Delay before start in ms. Default: 0
 ---  - repeat: Loop indefinitely. Default: false
 ---  - bounce: Reverse animation after reaching target. Default: false
+---  - easing: "linear"|"ease_in"|"ease_out"|"ease_in_out"|"overshoot"|"bounce"|"step". Default: "ease_in_out"
 function ui.anim_move(widget, x, y, opts) end
+
+---Stop all running animations on a widget immediately.
+---@param widget userdata Any widget handle
+function ui.anim_stop(widget) end
+
+---Animate an arc widget's value from `from` to `to` (range 0–100).
+---@param arc userdata Arc handle from ui.arc()
+---@param from integer Start value 0–100
+---@param to integer End value 0–100
+---@param opts? {time?: number, delay?: number, repeat?: boolean, bounce?: boolean, easing?: string} Options table
+---  - time: Duration in ms. Default: 500
+---  - delay: Delay before start in ms. Default: 0
+---  - repeat: Loop indefinitely. Default: false
+---  - bounce: Reverse animation after reaching `to`. Default: false
+---  - easing: "linear"|"ease_in"|"ease_out"|"ease_in_out"|"overshoot"|"bounce"|"step". Default: "ease_in_out"
+function ui.anim_arc(arc, from, to, opts) end
+
+---Animate a widget's size from its current dimensions to (w, h).
+---@param widget userdata Any widget handle
+---@param w integer Target width in pixels
+---@param h integer Target height in pixels
+---@param opts? {time?: number, delay?: number, repeat?: boolean, bounce?: boolean, easing?: string} Options table
+---  - time: Duration in ms. Default: 300
+---  - delay: Delay before start in ms. Default: 0
+---  - repeat: Loop indefinitely. Default: false
+---  - bounce: Reverse after reaching target size. Default: false
+---  - easing: "linear"|"ease_in"|"ease_out"|"ease_in_out"|"overshoot"|"bounce"|"step". Default: "ease_in_out"
+function ui.anim_size(widget, w, h, opts) end
 
 -- ---------------------------------------------------------------------------
 --  Canvas (raw pixel drawing, PSRAM-backed)
@@ -179,6 +209,28 @@ function ui.canvas_circle(canvas, cx, cy, r, color, thickness) end
 ---@param color? number Line colour as RGB565. Default: white
 ---@param thickness? number Line width in pixels. Default: 1
 function ui.canvas_arc(canvas, cx, cy, r, a1, a2, color, thickness) end
+
+---Draw connected line segments from a flat table of x,y pairs.
+---@param canvas userdata Canvas handle from ui.canvas()
+---@param points table Flat table of x,y pairs: {x1,y1, x2,y2, ...} — minimum 2 points (4 values)
+---@param color? number RGB565 colour. Default: white
+---@param width? number Line width in pixels. Default: 1
+function ui.canvas_polyline(canvas, points, color, width) end
+
+---Draw a cubic Bezier curve on a canvas.
+---@param canvas userdata Canvas handle from ui.canvas()
+---@param x0 number Start x
+---@param y0 number Start y
+---@param cx1 number Control point 1 x
+---@param cy1 number Control point 1 y
+---@param cx2 number Control point 2 x
+---@param cy2 number Control point 2 y
+---@param x1 number End x
+---@param y1 number End y
+---@param color? number RGB565 colour. Default: white
+---@param width? number Line width in pixels. Default: 1
+---@param steps? number Smoothness — number of segments 2–64. Default: 20
+function ui.canvas_bezier(canvas, x0, y0, cx1, cy1, cx2, cy2, x1, y1, color, width, steps) end
 
 ---Fill the entire canvas with a solid colour.
 ---@param canvas userdata Canvas handle from ui.canvas()

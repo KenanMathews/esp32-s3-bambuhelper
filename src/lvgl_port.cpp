@@ -8,44 +8,46 @@ extern TFT_eSPI tft;
 #include <lvgl.h>
 
 // ---------------------------------------------------------------------------
-//  Display flush — LVGL calls this to push a rendered region to the screen
+//  Display flush — LVGL 9 calls this to push a rendered region to the screen
 // ---------------------------------------------------------------------------
-static lv_disp_draw_buf_t draw_buf;
+static lv_display_t* g_disp = nullptr;
+
 // Two 20-line buffers: LVGL can render one while the other is being flushed
 static lv_color_t lv_buf1[240 * 20];
 static lv_color_t lv_buf2[240 * 20];
 
-static void disp_flush(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* color_p) {
+static void disp_flush(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
   uint32_t w = area->x2 - area->x1 + 1;
   uint32_t h = area->y2 - area->y1 + 1;
 
   tft.startWrite();
   tft.setAddrWindow(area->x1, area->y1, w, h);
-  tft.pushColors((uint16_t*)color_p, w * h, false);
+  tft.pushColors((uint16_t*)px_map, w * h, false);
   tft.endWrite();
 
-  lv_disp_flush_ready(drv);
+  lv_display_flush_ready(disp);
 }
 
 // ---------------------------------------------------------------------------
-//  Touch read — LVGL calls this to poll the input device
+//  Touch read — LVGL 9 input device callback
 // ---------------------------------------------------------------------------
-static void touch_read(lv_indev_drv_t* drv, lv_indev_data_t* data) {
+static lv_indev_t* g_indev = nullptr;
+
+static void touch_read(lv_indev_t* indev, lv_indev_data_t* data) {
   int16_t x = 0, y = 0;
   if (getTouchXY(&x, &y)) {
-    // Transform raw touch coordinates to match TFT rotation (240×240 display)
     int16_t tx = x, ty = y;
     switch (dispSettings.rotation) {
       case 1: tx = y;       ty = 239 - x; break;
       case 2: tx = 239 - x; ty = 239 - y; break;
       case 3: tx = 239 - y; ty = x;       break;
-      default: break;  // rotation 0: no transform
+      default: break;
     }
-    data->state   = LV_INDEV_STATE_PR;
+    data->state   = LV_INDEV_STATE_PRESSED;
     data->point.x = tx;
     data->point.y = ty;
   } else {
-    data->state = LV_INDEV_STATE_REL;
+    data->state = LV_INDEV_STATE_RELEASED;
   }
 }
 
@@ -55,35 +57,26 @@ static void touch_read(lv_indev_drv_t* drv, lv_indev_data_t* data) {
 void lvglPortInit() {
   lv_init();
 
-  // Double-buffer: smoother rendering at the cost of 2 × 240 × 20 × 2 = ~19 KB
-  lv_disp_draw_buf_init(&draw_buf, lv_buf1, lv_buf2, 240 * 20);
+  // Create display — LVGL 9 API
+  g_disp = lv_display_create(240, 240);
+  lv_display_set_flush_cb(g_disp, disp_flush);
+  lv_display_set_buffers(g_disp, lv_buf1, lv_buf2, sizeof(lv_buf1),
+                         LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_display_set_color_format(g_disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
 
-  // Register display driver
-  static lv_disp_drv_t disp_drv;
-  lv_disp_drv_init(&disp_drv);
-  disp_drv.hor_res  = 240;
-  disp_drv.ver_res  = 240;
-  disp_drv.flush_cb = disp_flush;
-  disp_drv.draw_buf = &draw_buf;
-  lv_disp_t* disp = lv_disp_drv_register(&disp_drv);
-
-  // Override the default theme: dark mode, neutral-green primary.
-  // Without this the default LVGL8 theme applies a purple/lavender accent
-  // to every widget that doesn't fully override its own styles.
+  // Theme
   lv_theme_t* th = lv_theme_default_init(
-      disp,
-      lv_palette_main(LV_PALETTE_GREEN),       // primary accent → green
-      lv_palette_main(LV_PALETTE_LIGHT_GREEN),  // secondary accent
-      true,                                     // dark mode
+      g_disp,
+      lv_palette_main(LV_PALETTE_GREEN),
+      lv_palette_main(LV_PALETTE_LIGHT_GREEN),
+      true,
       &lv_font_montserrat_14);
-  lv_disp_set_theme(disp, th);
+  lv_display_set_theme(g_disp, th);
 
-  // Register touch input driver
-  static lv_indev_drv_t indev_drv;
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type    = LV_INDEV_TYPE_POINTER;
-  indev_drv.read_cb = touch_read;
-  lv_indev_drv_register(&indev_drv);
+  // Create touch input device — LVGL 9 API
+  g_indev = lv_indev_create();
+  lv_indev_set_type(g_indev, LV_INDEV_TYPE_POINTER);
+  lv_indev_set_read_cb(g_indev, touch_read);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,5 +84,5 @@ void lvglPortInit() {
 // ---------------------------------------------------------------------------
 void lvglPortTick() {
   lv_timer_handler();
-  lv_tick_inc(5);   // tell LVGL ~5 ms has passed (loop runs faster than this)
+  lv_tick_inc(5);
 }

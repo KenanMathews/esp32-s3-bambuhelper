@@ -526,6 +526,7 @@ static const char PAGE_HTML[] PROGMEM = R"rawliteral(
           <thead><tr style="color:#8B949E;border-bottom:1px solid #30363D">
             <th style="text-align:left;padding:4px 8px">Name</th>
             <th style="text-align:left;padding:4px 8px">ID</th>
+            <th style="text-align:left;padding:4px 8px">Version</th>
             <th style="text-align:right;padding:4px 8px">Action</th>
           </tr></thead>
           <tbody id="appTableBody">%APPS_LIST%</tbody>
@@ -991,13 +992,14 @@ function refreshApps(){
   fetch('/app/list').then(function(r){return r.json();}).then(function(d){
     var tbody=document.getElementById('appTableBody');
     if(!d.apps||d.apps.length===0){
-      tbody.innerHTML='<tr><td colspan="3" style="padding:8px;color:#8B949E;font-size:12px">No apps installed</td></tr>';
+      tbody.innerHTML='<tr><td colspan="4" style="padding:8px;color:#8B949E;font-size:12px">No apps installed</td></tr>';
       return;
     }
     tbody.innerHTML=d.apps.map(function(a){
       return '<tr style="border-bottom:1px solid #21262D">'
         +'<td style="padding:6px 8px">'+a.name+'</td>'
         +'<td style="padding:6px 8px;color:#8B949E;font-size:12px">'+a.id+'</td>'
+        +'<td style="padding:6px 8px;color:#8B949E;font-size:12px">'+(a.version||'—')+'</td>'
         +'<td style="padding:6px 8px;text-align:right">'
         +'<button onclick="deleteApp(\''+a.id+'\')" style="background:#DA3633;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px">Delete</button>'
         +'</td></tr>';
@@ -1823,11 +1825,6 @@ static void handleAppUpload() {
     s_appUploadId  = "";
     s_appFileOpen  = false;
 
-    if (appManagerCount() >= APP_MAX_INSTALLED) {
-      s_appUploadErr = "Max apps reached (8). Delete one first.";
-      return;
-    }
-
     // Derive id from filename: strip .lua, replace non-alnum with '-'
     String fname = upload.filename;
     if (fname.endsWith(".lua")) fname = fname.substring(0, fname.length() - 4);
@@ -1840,6 +1837,15 @@ static void handleAppUpload() {
     if (id.length() == 0 || id.length() >= APP_ID_LEN) {
       s_appUploadErr = "Invalid filename"; return;
     }
+
+    // Only enforce the slot cap for new apps — overwriting an existing file is
+    // always allowed regardless of how many apps are installed.
+    bool isUpdate = LittleFS.exists("/apps/" + id + ".lua");
+    if (!isUpdate && appManagerCount() >= APP_MAX_INSTALLED) {
+      s_appUploadErr = "Max apps reached (8). Delete one first.";
+      return;
+    }
+
     s_appUploadId = id;
     // Truncate/create the file now (write mode) so it starts empty
     String path = "/apps/" + id + ".lua";
@@ -1880,15 +1886,19 @@ static void handleAppUploadFinish() {
   }
   // Re-scan app manager so the new file is picked up
   appManagerInit();
-  // Find the app to get its parsed name
-  String name = s_appUploadId;
-  uint8_t cnt = appManagerCount();
-  for (uint8_t i = 0; i < cnt; i++) {
-    const AppInfo* a = appManagerGetApp(i);
-    if (a && s_appUploadId == String(a->id)) { name = String(a->name); break; }
+  // Look up by id — if missing, @name was absent so parseHeaders rejected it
+  const AppInfo* a = appManagerGetAppById(s_appUploadId.c_str());
+  if (!a) {
+    LittleFS.remove(("/apps/" + s_appUploadId + ".lua").c_str());
+    server.send(400, "application/json",
+      "{\"status\":\"error\",\"message\":\"Missing -- @name header\"}");
+    s_appUploadId = "";
+    return;
   }
   server.send(200, "application/json",
-    "{\"status\":\"ok\",\"id\":\"" + s_appUploadId + "\",\"name\":\"" + name + "\"}");
+    "{\"status\":\"ok\",\"id\":\"" + s_appUploadId
+    + "\",\"name\":\"" + String(a->name)
+    + "\",\"version\":\"" + String(a->version) + "\"}");
   s_appUploadId = "";
 }
 
@@ -1912,7 +1922,8 @@ static void handleAppList() {
     const AppInfo* a = appManagerGetApp(i);
     if (!a) continue;
     if (i > 0) json += ",";
-    json += "{\"id\":\"" + String(a->id) + "\",\"name\":\"" + String(a->name) + "\"}";
+    json += "{\"id\":\"" + String(a->id) + "\",\"name\":\"" + String(a->name)
+          + "\",\"version\":\"" + String(a->version) + "\"}";
   }
   json += "]}";
   server.send(200, "application/json", json);

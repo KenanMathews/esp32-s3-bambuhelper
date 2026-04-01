@@ -1,7 +1,7 @@
 #ifndef SDK_API_H
 #define SDK_API_H
 
-#define SDK_VERSION 2
+#define SDK_VERSION 1
 
 #ifdef LUA_AVAILABLE
 extern "C" {

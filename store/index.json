@@ -1,17 +1,17 @@
 {
-  "version": 2,
-  "updated": "2026-03-29",
+  "version": 1,
+  "updated": "2026-04-01",
   "apps": [
     {
-      "id": "mission-control",
-      "name": "Mission Control",
-      "description": "Watch face with progress arcs, temps, ETA, and end-of-print report",
+      "id": "crosshair",
+      "name": "Crosshair",
+      "description": "Animated targeting crosshair shown during toolhead homing. Exits when printer is idle.",
       "author": "BambuHelper",
       "category": "monitor",
       "version": "1.0",
-      "sdk_min": 2,
-      "color": 2086,
-      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/mission-control.lua"
+      "sdk_min": 1,
+      "color": 2016,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/crosshair.lua"
     },
     {
       "id": "layer-timeline",
@@ -20,20 +20,20 @@
       "author": "BambuHelper",
       "category": "monitor",
       "version": "1.0",
-      "sdk_min": 2,
+      "sdk_min": 1,
       "color": 552,
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/layer-timeline.lua"
     },
     {
-      "id": "crosshair",
-      "name": "Crosshair",
-      "description": "Animated targeting crosshair with radar sweep and sonar ping. Shows during homing.",
+      "id": "mission-control",
+      "name": "Mission Control",
+      "description": "Animated printer status: state-appropriate animation for every print phase.",
       "author": "BambuHelper",
       "category": "monitor",
-      "version": "1.0",
-      "sdk_min": 2,
+      "version": "2.0",
+      "sdk_min": 1,
       "color": 2016,
-      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/crosshair.lua"
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/mission-control.lua"
     },
     {
       "id": "print-report",
@@ -42,7 +42,7 @@
       "author": "BambuHelper",
       "category": "monitor",
       "version": "1.0",
-      "sdk_min": 2,
+      "sdk_min": 1,
       "color": 552,
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/print-report.lua"
     }
