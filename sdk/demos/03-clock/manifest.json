@@ -1,0 +1,11 @@
+{
+  "id": "03-clock",
+  "name": "Digital Clock",
+  "description": "Live digital clock with blinking colon, date, and a sweeping seconds arc. Demonstrates sys.time() and sys.every().",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["clock", "time", "arc", "timer"],
+  "color": "0x07FF"
+}

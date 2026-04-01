@@ -1,0 +1,11 @@
+{
+  "id": "02-colors-fonts",
+  "name": "Colors & Fonts",
+  "description": "Static showcase of all five font sizes, ui.color(), and the label alignment system.",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["beginner", "label", "color", "font", "static"],
+  "color": "0xF81F"
+}

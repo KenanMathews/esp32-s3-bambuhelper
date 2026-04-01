@@ -1,0 +1,11 @@
+{
+  "id": "04-animations",
+  "name": "Animations",
+  "description": "Interactive tour of all five animation functions and every easing curve. Tap to advance through stages.",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["animation", "easing", "interactive", "tap"],
+  "color": "0xFBE0"
+}

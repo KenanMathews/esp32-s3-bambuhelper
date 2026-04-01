@@ -414,10 +414,23 @@ All canvas functions take the canvas handle as first argument. Colors are RGB565
 
 #### Animations
 
+All animation functions accept an `opts` table with these keys:
+
+| Key | Default | Description |
+|---|---|---|
+| `time` | 300 (500 for `anim_arc`) | Duration in milliseconds |
+| `delay` | 0 | Delay before start in milliseconds |
+| `repeat` | false | Loop indefinitely |
+| `bounce` | false | Reverse back to start after reaching the target |
+| `easing` | `"ease_in_out"` | Curve: `"linear"` `"ease_in"` `"ease_out"` `"ease_in_out"` `"overshoot"` `"bounce"` `"step"` |
+
 | Function | Description |
 |---|---|
-| `ui.anim_fade(handle, from, to, opts)` | Fade opacity from→to. `opts`: `{time=300, delay=0, repeat=false, bounce=false}` |
-| `ui.anim_move(handle, x, y, opts)` | Animate widget to position (x, y). Same opts as above. |
+| `ui.anim_fade(handle, from, to, opts)` | Fade opacity. `from`/`to` are 0–255. |
+| `ui.anim_move(handle, x, y, opts)` | Animate widget to absolute position (x, y). |
+| `ui.anim_arc(handle, from, to, opts)` | Animate arc value. `from`/`to` are 0–100. |
+| `ui.anim_size(handle, w, h, opts)` | Animate widget dimensions to (w, h) pixels. |
+| `ui.anim_stop(handle)` | Cancel all running animations on a widget. |
 
 #### Events
 

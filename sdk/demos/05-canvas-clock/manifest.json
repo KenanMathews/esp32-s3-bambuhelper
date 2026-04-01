@@ -1,0 +1,11 @@
+{
+  "id": "05-canvas-clock",
+  "name": "Canvas Clock",
+  "description": "Analog clock face drawn entirely with canvas primitives — clear and redraw every second. Demonstrates the full canvas drawing API.",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["canvas", "clock", "drawing", "time"],
+  "color": "0x4A10"
+}

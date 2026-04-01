@@ -1,0 +1,11 @@
+{
+  "id": "01-hello",
+  "name": "Hello World",
+  "description": "Simplest possible app: a label and an elapsed-time counter. No tick loop needed.",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["beginner", "label", "timer"],
+  "color": "0x07E0"
+}

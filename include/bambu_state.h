@@ -50,6 +50,7 @@ struct BambuState {
   uint8_t heatbreakFanPct;    // heatbreak fan 0-100%
   int8_t wifiSignal;          // RSSI in dBm
   uint8_t speedLevel;         // 1=silent, 2=standard, 3=sport, 4=ludicrous
+  int16_t printStage;         // stg_cur: -1/255=idle, 0=printing, 1-65+=sub-stage (cached, delta protocol)
   bool dualNozzle;            // H2D/H2C dual extruder detected
   uint8_t activeNozzle;       // 0=left, 1=right (only when dualNozzle)
   bool doorOpen;              // enclosure door open (H2 series)

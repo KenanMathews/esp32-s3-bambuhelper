@@ -1,0 +1,11 @@
+{
+  "id": "07-printer-status",
+  "name": "Printer Status",
+  "description": "Comprehensive bambu.* API showcase: progress arc, state, temps, fans, layer counter, speed, ETA, and AMS tray colours.",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["printer", "bambu", "progress", "temperature", "ams"],
+  "color": "0x34DF"
+}

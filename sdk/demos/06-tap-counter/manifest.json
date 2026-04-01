@@ -1,0 +1,11 @@
+{
+  "id": "06-tap-counter",
+  "name": "Tap Counter",
+  "description": "Tap a button to count. Demonstrates ui.on_tap, anim_size for haptic-style feedback, and sys.store for persistence across launches.",
+  "author": "BambuHelper Team",
+  "version": "1.0",
+  "sdk_min": 2,
+  "category": "demo",
+  "tags": ["interactive", "tap", "storage", "animation"],
+  "color": "0xFFE0"
+}
