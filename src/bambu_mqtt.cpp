@@ -421,8 +421,13 @@ static void parseMqttPayload(byte* payload, unsigned int length,
     s.subtaskName[sizeof(s.subtaskName) - 1] = '\0';
   }
 
-  if (print["layer_num"].is<int>())
-    s.layerNum = print["layer_num"].as<int>();
+  if (print["layer_num"].is<int>()) {
+    uint16_t newLayer = print["layer_num"].as<int>();
+    if (newLayer != s.layerNum) {
+      s.layerNum = newLayer;
+      s.layerEventId++;
+    }
+  }
 
   if (print["total_layer_num"].is<int>())
     s.totalLayers = print["total_layer_num"].as<int>();

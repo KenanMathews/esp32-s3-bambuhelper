@@ -57,6 +57,7 @@ struct BambuState {
   bool doorSensorPresent;     // door sensor ever detected
   bool doorAcknowledged;      // user acknowledged print removal via door open
   unsigned long lastUpdate;   // millis() of last MQTT message
+  uint32_t layerEventId;      // increments every time layerNum changes (for change detection)
   bool finishBuzzerPlayed;    // true after FINISH buzzer played (reset on next print)
   AmsState ams;               // AMS tray data
 };

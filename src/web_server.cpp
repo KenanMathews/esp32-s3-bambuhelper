@@ -1384,6 +1384,116 @@ static void handleStatus() {
   server.send(200, "application/json", json);
 }
 
+// ---------------------------------------------------------------------------
+//  /api/printer — full printer state for external apps (Expo dashboard etc.)
+//  Includes all BambuState fields + AMS tray colors.
+//  CORS headers allow any origin (Expo dev client / LAN app).
+// ---------------------------------------------------------------------------
+static String rgb565ToHex(uint16_t c) {
+  uint8_t r = ((c >> 11) & 0x1F) * 255 / 31;
+  uint8_t g = ((c >>  5) & 0x3F) * 255 / 63;
+  uint8_t b = ( c        & 0x1F) * 255 / 31;
+  char buf[8];
+  snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
+  return String(buf);
+}
+
+static void handleApiPrinter() {
+  uint8_t slot = 0;
+  if (server.hasArg("slot")) slot = constrain(server.arg("slot").toInt(), 0, MAX_ACTIVE_PRINTERS - 1);
+
+  BambuState& st = printers[slot].state;
+
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-store");
+
+  JsonDocument doc;
+
+  // Identity & change detection
+  doc["slot"]           = slot;
+  doc["event_id"]       = st.layerEventId;
+  doc["last_update_ms"] = st.lastUpdate;
+
+  // Connection & print state
+  doc["connected"]      = st.connected;
+  doc["printing"]       = st.printing;
+  doc["state"]          = st.gcodeState;
+  doc["print_stage"]    = st.printStage;
+  doc["subtask_name"]   = st.subtaskName;
+
+  // Progress
+  doc["progress"]       = st.progress;
+  doc["layer"]          = st.layerNum;
+  doc["total_layers"]   = st.totalLayers;
+  doc["remaining_mins"] = st.remainingMinutes;
+
+  // Temperatures
+  doc["nozzle"]         = st.nozzleTemp;
+  doc["nozzle_target"]  = st.nozzleTarget;
+  doc["bed"]            = st.bedTemp;
+  doc["bed_target"]     = st.bedTarget;
+  doc["chamber"]        = st.chamberTemp;
+
+  // Fans
+  doc["fan_part"]       = st.coolingFanPct;
+  doc["fan_aux"]        = st.auxFanPct;
+  doc["fan_chamber"]    = st.chamberFanPct;
+  doc["fan_heatbreak"]  = st.heatbreakFanPct;
+
+  // Hardware
+  doc["speed_level"]    = st.speedLevel;
+  doc["wifi_signal"]    = st.wifiSignal;
+  doc["door_open"]      = st.doorOpen;
+  doc["dual_nozzle"]    = st.dualNozzle;
+  doc["active_nozzle"]  = st.activeNozzle;
+
+  // AMS
+  JsonObject ams = doc["ams"].to<JsonObject>();
+  ams["present"]      = st.ams.present;
+  ams["unit_count"]   = st.ams.unitCount;
+  ams["active_tray"]  = st.ams.activeTray;
+  JsonArray trays = ams["trays"].to<JsonArray>();
+  for (int i = 0; i < AMS_MAX_TRAYS; i++) {
+    const AmsTray& t = st.ams.trays[i];
+    JsonObject tray = trays.add<JsonObject>();
+    tray["present"] = t.present;
+    tray["color"]   = rgb565ToHex(t.colorRgb565);
+    tray["type"]    = t.type;
+  }
+  ams["vt_present"] = st.ams.vtPresent;
+  ams["vt_color"]   = rgb565ToHex(st.ams.vtColorRgb565);
+  ams["vt_type"]    = st.ams.vtType;
+
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// Keep /api/layer as a lightweight alias (event_id + layer only) for the poller
+static void handleApiLayer() {
+  uint8_t slot = 0;
+  if (server.hasArg("slot")) slot = constrain(server.arg("slot").toInt(), 0, MAX_ACTIVE_PRINTERS - 1);
+
+  BambuState& st = printers[slot].state;
+
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-store");
+
+  JsonDocument doc;
+  doc["slot"]           = slot;
+  doc["layer"]          = st.layerNum;
+  doc["total_layers"]   = st.totalLayers;
+  doc["event_id"]       = st.layerEventId;
+  doc["printing"]       = st.printing;
+  doc["state"]          = st.gcodeState;
+  doc["progress"]       = st.progress;
+  doc["last_update_ms"] = st.lastUpdate;
+
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
 static void handleReset() {
   server.send(200, "text/html",
     "<html><body style='background:#0D1117;color:#E6EDF3;text-align:center;padding-top:80px;font-family:sans-serif'>"
@@ -1965,6 +2075,8 @@ void initWebServer() {
   server.on("/app/upload", HTTP_POST, handleAppUploadFinish, handleAppUpload);
   server.on("/app/delete", HTTP_POST, handleAppDelete);
   server.on("/app/list", HTTP_GET, handleAppList);
+  server.on("/api/layer",   HTTP_GET, handleApiLayer);
+  server.on("/api/printer", HTTP_GET, handleApiPrinter);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("Web server started on port 80");
