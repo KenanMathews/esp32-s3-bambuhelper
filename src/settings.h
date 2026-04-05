@@ -66,6 +66,7 @@ struct BuzzerSettings {
 
 extern char wifiSSID[33];
 extern char wifiPass[65];
+extern bool bleEnabled;   // persisted in NVS "ble_enabled"
 extern uint8_t brightness;
 extern char storeUrl[256];   // URL to app store index.json
 extern DisplaySettings dispSettings;

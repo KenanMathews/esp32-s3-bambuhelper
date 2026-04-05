@@ -10,6 +10,8 @@
 #include "buzzer.h"
 #include "timezones.h"
 #include "app_manager.h"
+#include "api_auth.h"
+#include "sdk_api.h"
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <Update.h>
@@ -2055,6 +2057,88 @@ static void handleSaveStoreUrl() {
 // ---------------------------------------------------------------------------
 //  Init & handle
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  /api/mobile/* — authenticated endpoints for the companion app
+//  All require X-API-Key header matching the device's stored key.
+// ---------------------------------------------------------------------------
+
+// GET /api/mobile/info — device identity & capabilities
+static void handleMobileInfo() {
+  if (!apiAuthCheck(server)) return;
+  JsonDocument doc;
+  doc["fw"]          = FW_VERSION;
+  doc["sdk_version"] = SDK_VERSION;
+  doc["ssid"]        = wifiSSID;
+  doc["ip"]          = WiFi.localIP().toString();
+  doc["ble_enabled"] = bleEnabled;
+  doc["key_hint"]    = apiAuthGetKeyHint();
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// POST /api/mobile/pair/confirm — verify key, return 200 or 401
+static void handleMobilePairConfirm() {
+  if (!apiAuthCheck(server)) return;
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+// POST /api/mobile/wifi — change WiFi credentials, restart
+static void handleMobileWifi() {
+  if (!apiAuthCheck(server)) return;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err || !doc["ssid"].is<const char*>()) {
+    server.send(400, "application/json", "{\"error\":\"bad request\"}");
+    return;
+  }
+  strlcpy(wifiSSID, doc["ssid"].as<const char*>(), sizeof(wifiSSID));
+  if (doc["pass"].is<const char*>()) {
+    strlcpy(wifiPass, doc["pass"].as<const char*>(), sizeof(wifiPass));
+  }
+  saveSettings();
+  server.send(200, "application/json", "{\"status\":\"restarting\",\"ble_fallback\":true}");
+  delay(500);
+  ESP.restart();
+}
+
+// GET /api/mobile/settings — full settings export (reuse existing logic)
+static void handleMobileSettingsGet() {
+  if (!apiAuthCheck(server)) return;
+  handleSettingsExport();  // reuse — sends JSON with Content-Disposition header
+}
+
+// POST /api/mobile/settings — bulk import (JSON body, max 8KB)
+static void handleMobileSettingsPost() {
+  if (!apiAuthCheck(server)) return;
+  settingsImportBuf = server.arg("plain");
+  handleSettingsImportFinish();
+}
+
+// GET /api/mobile/ble — BLE status
+static void handleMobileBleGet() {
+  if (!apiAuthCheck(server)) return;
+  JsonDocument doc;
+  doc["enabled"] = bleEnabled;
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
+}
+
+// POST /api/mobile/ble — toggle BLE on/off
+static void handleMobileBlePost() {
+  if (!apiAuthCheck(server)) return;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err || !doc["enabled"].is<bool>()) {
+    server.send(400, "application/json", "{\"error\":\"bad request\"}");
+    return;
+  }
+  bleEnabled = doc["enabled"].as<bool>();
+  saveSettings();
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
 void initWebServer() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save/wifi", HTTP_POST, handleSaveWifi);
@@ -2077,6 +2161,19 @@ void initWebServer() {
   server.on("/app/list", HTTP_GET, handleAppList);
   server.on("/api/layer",   HTTP_GET, handleApiLayer);
   server.on("/api/printer", HTTP_GET, handleApiPrinter);
+
+  // ── Mobile companion API (auth required via X-API-Key header) ────────────
+  apiAuthInit();
+  const char* headers[] = { "X-API-Key" };
+  server.collectHeaders(headers, 1);
+  server.on("/api/mobile/info",         HTTP_GET,  handleMobileInfo);
+  server.on("/api/mobile/pair/confirm", HTTP_POST, handleMobilePairConfirm);
+  server.on("/api/mobile/wifi",         HTTP_POST, handleMobileWifi);
+  server.on("/api/mobile/settings",     HTTP_GET,  handleMobileSettingsGet);
+  server.on("/api/mobile/settings",     HTTP_POST, handleMobileSettingsPost);
+  server.on("/api/mobile/ble",          HTTP_GET,  handleMobileBleGet);
+  server.on("/api/mobile/ble",          HTTP_POST, handleMobileBlePost);
+
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("Web server started on port 80");

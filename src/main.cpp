@@ -14,6 +14,9 @@
 #include "button.h"
 #include "buzzer.h"
 #include <BambuClient.h>
+#include <ESPmDNS.h>
+#include "ble_manager.h"
+#include "sdk_api.h"
 
 // ---------------------------------------------------------------------------
 //  App state
@@ -119,6 +122,21 @@ static void handleLauncherSelection(int8_t sel) {
         uint8_t appIdx = (uint8_t)(sel - LAUNCHER_USER_BASE);
         const AppInfo* app = appManagerGetApp(appIdx);
         if (app) {
+          // SDK version gate — reject apps that require a newer SDK
+          if (app->sdk_min > SDK_VERSION) {
+            Serial.printf("[app] '%s' requires SDK v%d, device has v%d — blocked\n",
+                          app->name, app->sdk_min, SDK_VERSION);
+            // Inject a tiny error script so the app screen shows the message
+            char errScript[128];
+            snprintf(errScript, sizeof(errScript),
+              "error('Requires SDK v%d (device has v%d)')", app->sdk_min, SDK_VERSION);
+            appScreenPrepare(app->name);
+            lv_scr_load(appScreenGet());
+            lvglPortTick();
+            setScreenState(SCREEN_APP);
+            luaRuntimeRun(errScript, strlen(errScript), app->name);
+            break;
+          }
           size_t scriptLen = 0;
           char* script = appManagerLoadScript(app->id, &scriptLen);
           if (script) {
@@ -152,6 +170,7 @@ void setup() {
   Serial.printf("\n=== BambuHelper %s Starting ===\n", FW_VERSION);
 
   loadSettings();
+  imuInit();        // QMI8658 on shared I2C bus — init before LVGL takes Wire
   appManagerInit();
   luaRuntimeInit();
   initDisplay();   // calls lvglPortInit() internally; shows splash via LVGL
@@ -171,12 +190,20 @@ void loop() {
     bambuClient.begin();
     initButton();
     initBuzzer();
+    if (MDNS.begin("bambuhelper")) {
+      MDNS.addService("http", "tcp", 80);
+      Serial.println("mDNS: bambuhelper.local");
+    }
+    if (bleEnabled) {
+      initBLE();
+    }
   }
   if (splashEnd > 0) { delay(10); return; }
 
   // ── Always-running handlers ───────────────────────────────────────────────
   handleWiFi();
   handleWebServer();
+  if (bleEnabled) handleBLE();
 
   // ── Always pump LVGL except when pong clock owns the display ────────────
   bool pongActive = (getScreenState() == SCREEN_CLOCK && dispSettings.pongClock);

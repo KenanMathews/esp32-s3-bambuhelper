@@ -16,6 +16,7 @@ DisplayPowerSettings dpSettings;
 char cloudEmail[64] = {0};
 BuzzerSettings buzzerSettings = { false, BUZZER_DEFAULT_PIN, 0, 0 };
 char storeUrl[256] = {0};
+bool bleEnabled = false;
 
 static Preferences prefs;
 
@@ -264,6 +265,9 @@ void loadSettings() {
   // Store URL
   strlcpy(storeUrl, prefs.getString("app_store_url", "").c_str(), sizeof(storeUrl));
 
+  // BLE
+  bleEnabled = prefs.getBool("ble_enabled", false);
+
   prefs.end();
 }
 
@@ -321,6 +325,9 @@ void saveSettings() {
 
   // Store URL
   prefs.putString("app_store_url", storeUrl);
+
+  // BLE
+  prefs.putBool("ble_enabled", bleEnabled);
 
   prefs.end();
 }

@@ -109,4 +109,26 @@
 // =============================================================================
 #define BUZZER_DEFAULT_PIN    5       // default GPIO for buzzer
 
+// =============================================================================
+//  Mobile companion API auth
+// =============================================================================
+#define API_KEY_NVS_KEY     "api_key"   // NVS key (in NVS_NAMESPACE "bambu")
+
+// =============================================================================
+//  BLE (NimBLE peripheral — mobile companion pairing & data sync)
+// =============================================================================
+#define BLE_ADV_NAME        "BambuHelper"
+// 128-bit service UUID (custom, derived for BambuHelper)
+#define BLE_SVC_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+// Characteristic UUIDs
+#define BLE_CHAR_DEVICE_INFO    "beb5483e-36e1-4688-b7f5-ea07361b26a8"  // READ
+#define BLE_CHAR_WIFI_STATUS    "beb5483e-36e1-4688-b7f5-ea07361b26a9"  // READ|NOTIFY
+#define BLE_CHAR_WIFI_CONFIG    "beb5483e-36e1-4688-b7f5-ea07361b26aa"  // WRITE
+#define BLE_CHAR_PRINTER_STATUS "beb5483e-36e1-4688-b7f5-ea07361b26ab"  // READ|NOTIFY
+
+// =============================================================================
+//  QMI8658 IMU (onboard, shared I2C bus with CST816S touch)
+// =============================================================================
+#define IMU_I2C_ADDR        0x6A    // SA0=low (Waveshare default)
+
 #endif // CONFIG_H

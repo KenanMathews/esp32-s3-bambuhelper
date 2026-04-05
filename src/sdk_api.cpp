@@ -7,12 +7,16 @@
 #include "bambu_state.h"
 #include "buzzer.h"
 #include "settings.h"
+#include "ble_manager.h"
 #include <lvgl.h>
 #include <HTTPClient.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <time.h>
 #include <math.h>
+#include <Wire.h>
+#include <SensorQMI8658.hpp>   // lewisxhe/SensorLib
+#include <NimBLEDevice.h>
 
 extern "C" {
 #include "lua.h"
@@ -1054,6 +1058,149 @@ void sdkDrainTapQueue(lua_State* L) {
 }
 
 // ===========================================================================
+//  imu.* — QMI8658 6-axis IMU (onboard, shared I2C bus GPIO6/GPIO7)
+// ===========================================================================
+
+static SensorQMI8658 s_qmi;
+static bool          s_imuReady = false;
+
+// Called once from main.cpp setup() after loadSettings().
+// Declared here; exposed via sdk_api.h via imuInit().
+void imuInit() {
+  if (s_qmi.begin(Wire, IMU_I2C_ADDR, TOUCH_SDA, TOUCH_SCL)) {
+    s_qmi.configAccelerometer(SensorQMI8658::ACC_RANGE_8G, SensorQMI8658::ACC_ODR_1000Hz, SensorQMI8658::LPF_MODE_0);
+    s_qmi.configGyroscope(SensorQMI8658::GYR_RANGE_512DPS, SensorQMI8658::GYR_ODR_896_8Hz, SensorQMI8658::LPF_MODE_0);
+    s_qmi.enableAccelerometer();
+    s_qmi.enableGyroscope();
+    s_imuReady = true;
+    Serial.println("[imu] QMI8658 init OK");
+  } else {
+    Serial.println("[imu] QMI8658 init FAILED");
+  }
+}
+
+static int imu_ready(lua_State* L) {
+  lua_pushboolean(L, s_imuReady && s_qmi.getDataReady());
+  return 1;
+}
+
+static int imu_accel(lua_State* L) {
+  if (!s_imuReady) { lua_pushnil(L); return 1; }
+  float x = 0, y = 0, z = 0;
+  s_qmi.getAccelerometer(x, y, z);
+  lua_newtable(L);
+  lua_pushnumber(L, x); lua_setfield(L, -2, "x");
+  lua_pushnumber(L, y); lua_setfield(L, -2, "y");
+  lua_pushnumber(L, z); lua_setfield(L, -2, "z");
+  return 1;
+}
+
+static int imu_gyro(lua_State* L) {
+  if (!s_imuReady) { lua_pushnil(L); return 1; }
+  float x = 0, y = 0, z = 0;
+  s_qmi.getGyroscope(x, y, z);
+  lua_newtable(L);
+  lua_pushnumber(L, x); lua_setfield(L, -2, "x");
+  lua_pushnumber(L, y); lua_setfield(L, -2, "y");
+  lua_pushnumber(L, z); lua_setfield(L, -2, "z");
+  return 1;
+}
+
+static int imu_temp(lua_State* L) {
+  if (!s_imuReady) { lua_pushnumber(L, 0); return 1; }
+  float t = s_qmi.getTemperature_C();
+  lua_pushnumber(L, t);
+  return 1;
+}
+
+// Convenience: compute pitch and roll from accelerometer
+static int imu_tilt(lua_State* L) {
+  if (!s_imuReady) { lua_pushnil(L); return 1; }
+  float x = 0, y = 0, z = 0;
+  s_qmi.getAccelerometer(x, y, z);
+  float pitch = atan2f(-x, sqrtf(y * y + z * z)) * 57.2957795f;
+  float roll  = atan2f(y, z) * 57.2957795f;
+  lua_newtable(L);
+  lua_pushnumber(L, pitch); lua_setfield(L, -2, "pitch");
+  lua_pushnumber(L, roll);  lua_setfield(L, -2, "roll");
+  return 1;
+}
+
+// True if instantaneous acceleration magnitude is outside the 0.8–1.2 g band
+static int imu_shake(lua_State* L) {
+  if (!s_imuReady) { lua_pushboolean(L, false); return 1; }
+  float x = 0, y = 0, z = 0;
+  s_qmi.getAccelerometer(x, y, z);
+  float mag = sqrtf(x * x + y * y + z * z);  // m/s²
+  bool shaking = (mag < 7.85f || mag > 11.77f);  // outside ~0.8g–1.2g
+  lua_pushboolean(L, shaking);
+  return 1;
+}
+
+static const luaL_Reg imu_lib[] = {
+  { "ready", imu_ready },
+  { "accel", imu_accel },
+  { "gyro",  imu_gyro  },
+  { "temp",  imu_temp  },
+  { "tilt",  imu_tilt  },
+  { "shake", imu_shake },
+  { nullptr, nullptr   }
+};
+
+// ===========================================================================
+//  ble.* — BLE 5.0 central (scanner/client) for Lua apps
+// ===========================================================================
+
+// ble.scan(duration_ms) → table of {name, addr, rssi}
+static int ble_scan(lua_State* L) {
+  int durationMs = (int)luaL_optinteger(L, 1, 1000);
+  durationMs = constrain(durationMs, 100, 5000);
+
+  NimBLEScan* scan = NimBLEDevice::getScan();
+  scan->setActiveScan(true);
+  scan->setInterval(97);
+  scan->setWindow(37);
+  NimBLEScanResults results = scan->start(durationMs / 1000, false);
+
+  lua_newtable(L);
+  for (int i = 0; i < results.getCount(); i++) {
+    NimBLEAdvertisedDevice dev = results.getDevice(i);
+    lua_newtable(L);
+    lua_pushstring(L, dev.getName().c_str());   lua_setfield(L, -2, "name");
+    lua_pushstring(L, dev.getAddress().toString().c_str()); lua_setfield(L, -2, "addr");
+    lua_pushinteger(L, dev.getRSSI());           lua_setfield(L, -2, "rssi");
+    lua_rawseti(L, -2, i + 1);
+  }
+  scan->clearResults();
+  return 1;
+}
+
+// ble.advertising() → bool
+static int ble_advertising(lua_State* L) {
+  lua_pushboolean(L, bleIsAdvertising());
+  return 1;
+}
+
+// ble.set_advertising(bool)
+static int ble_set_advertising(lua_State* L) {
+  bool enable = lua_toboolean(L, 1);
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  if (enable) {
+    adv->start();
+  } else {
+    adv->stop();
+  }
+  return 0;
+}
+
+static const luaL_Reg ble_lib[] = {
+  { "scan",            ble_scan            },
+  { "advertising",     ble_advertising     },
+  { "set_advertising", ble_set_advertising },
+  { nullptr,           nullptr             }
+};
+
+// ===========================================================================
 //  Registration
 // ===========================================================================
 
@@ -1065,6 +1212,8 @@ void sdkApiRegister(lua_State* L) {
     luaL_newlib(L, bambu_lib);  lua_setglobal(L, "bambu");
     luaL_newlib(L, sys_lib);    lua_setglobal(L, "sys");
     luaL_newlib(L, ui_lib);     lua_setglobal(L, "ui");
+    luaL_newlib(L, imu_lib);    lua_setglobal(L, "imu");
+    luaL_newlib(L, ble_lib);    lua_setglobal(L, "ble");
 }
 
 #endif // LUA_AVAILABLE

@@ -1,7 +1,7 @@
 #ifndef SDK_API_H
 #define SDK_API_H
 
-#define SDK_VERSION 1
+#define SDK_VERSION 2  // v2: added imu.* (QMI8658 accel/gyro) and ble.* (NimBLE central/peripheral)
 
 #ifdef LUA_AVAILABLE
 extern "C" {
@@ -28,4 +28,9 @@ void sdkTickTimers(lua_State* L);
 void sdkDrainTapQueue(lua_State* L);
 
 #endif // LUA_AVAILABLE
+
+// IMU init — call once from main.cpp setup() after loadSettings()
+// Safe to call regardless of LUA_AVAILABLE.
+void imuInit();
+
 #endif // SDK_API_H
