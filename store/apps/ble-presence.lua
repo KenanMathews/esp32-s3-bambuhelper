@@ -61,8 +61,8 @@ local canvas = ui.canvas(scr, 240, 240, 0, 0)
 
 -- Labels
 local lbl_status  = ui.label(scr, "BLE Guard",    {align="top_mid",    y=14,  font=16, color=CLR_CYAN})
-local lbl_icon    = ui.label(scr, "📶",            {align="center",     y=-28, font=28, color=CLR_TEXT})
-local lbl_main    = ui.label(scr, "Waiting…",      {align="center",     y=8,   font=20, color=CLR_DIM})
+local lbl_icon    = ui.label(scr, "[BLE]",         {align="center",     y=-28, font=28, color=CLR_TEXT})
+local lbl_main    = ui.label(scr, "Waiting...",    {align="center",     y=8,   font=20, color=CLR_DIM})
 local lbl_rssi    = ui.label(scr, "",              {align="center",     y=38,  font=14, color=CLR_DIM})
 local lbl_print   = ui.label(scr, "",              {align="bottom_mid", y=-34, font=14, color=CLR_DIM})
 local lbl_hint    = ui.label(scr, "tap to snooze", {align="bottom_mid", y=-14, font=14, color=CLR_DIM})
@@ -72,9 +72,9 @@ local lbl_hint    = ui.label(scr, "tap to snooze", {align="bottom_mid", y=-14, f
 -- ─────────────────────────────────────────────────────────────────────────────
 local function rssi_to_dist(rssi)
   if rssi >= -55 then return "Very close"
-  elseif rssi >= -67 then return "~1–2 m"
-  elseif rssi >= -75 then return "~3–5 m"
-  elseif rssi >= -85 then return "~5–10 m"
+  elseif rssi >= -67 then return "~1-2 m"
+  elseif rssi >= -75 then return "~3-5 m"
+  elseif rssi >= -85 then return "~5-10 m"
   else return "Far / lost"
   end
 end
@@ -171,8 +171,8 @@ local function update_ui()
     draw_ring(-60, CLR_DIM)
     ui.label_set(lbl_status, "BLE Guard")
     ui.label_color(lbl_status, CLR_CYAN)
-    ui.label_set(lbl_icon, "🔵")
-    ui.label_set(lbl_main, "Monitoring…")
+    ui.label_set(lbl_icon, "[--]")
+    ui.label_set(lbl_main, "Monitoring...")
     ui.label_color(lbl_main, CLR_DIM)
     ui.label_set(lbl_rssi, last_scan_count .. " devices nearby")
     ui.label_set(lbl_hint, "Prints only")
@@ -181,7 +181,7 @@ local function update_ui()
     draw_ring(last_rssi, CLR_GREEN)
     ui.label_set(lbl_status, "Present")
     ui.label_color(lbl_status, CLR_GREEN)
-    ui.label_set(lbl_icon, "✅")
+    ui.label_set(lbl_icon, "[OK]")
     ui.label_set(lbl_main, rssi_to_dist(last_rssi))
     ui.label_color(lbl_main, CLR_GREEN)
     ui.label_set(lbl_rssi, last_rssi .. " dBm")
@@ -191,9 +191,9 @@ local function update_ui()
     local elapsed = fi((sys.millis() - lost_since) / 1000)
     local grace   = fi(ALERT_GRACE / 1000)
     draw_ring(last_rssi, CLR_YELLOW)
-    ui.label_set(lbl_status, "Searching…")
+    ui.label_set(lbl_status, "Searching...")
     ui.label_color(lbl_status, CLR_YELLOW)
-    ui.label_set(lbl_icon, "🔍")
+    ui.label_set(lbl_icon, "[?]")
     ui.label_set(lbl_main, elapsed .. "s / " .. grace .. "s")
     ui.label_color(lbl_main, CLR_YELLOW)
     ui.label_set(lbl_rssi, "last: " .. last_rssi .. " dBm")
@@ -201,9 +201,9 @@ local function update_ui()
 
   elseif state == STATE_ALERT then
     draw_alert_ring()
-    ui.label_set(lbl_status, "⚠ ALERT ⚠")
+    ui.label_set(lbl_status, "[!] ALERT [!]")
     ui.label_color(lbl_status, CLR_RED)
-    ui.label_set(lbl_icon, "❌")
+    ui.label_set(lbl_icon, "[X]")
     ui.label_set(lbl_main, "Phone lost!")
     ui.label_color(lbl_main, CLR_RED)
     local away = fi((sys.millis() - lost_since) / 1000)
@@ -217,7 +217,7 @@ local function update_ui()
     draw_ring(last_rssi, CLR_BLUE)
     ui.label_set(lbl_status, "Snoozed")
     ui.label_color(lbl_status, CLR_BLUE)
-    ui.label_set(lbl_icon, "💤")
+    ui.label_set(lbl_icon, "[zz]")
     local remaining = fi((snooze_until - sys.millis()) / 1000)
     ui.label_set(lbl_main, fi(remaining / 60) .. "m " .. (remaining % 60) .. "s")
     ui.label_color(lbl_main, CLR_DIM)

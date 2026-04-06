@@ -1151,8 +1151,17 @@ static const luaL_Reg imu_lib[] = {
 //  ble.* — BLE 5.0 central (scanner/client) for Lua apps
 // ===========================================================================
 
+static bool s_nimble_initialized = false;
+
 // ble.scan(duration_ms) → table of {name, addr, rssi}
 static int ble_scan(lua_State* L) {
+  // Lazy init — NimBLEDevice::init() must be called before getScan() works.
+  // initBLE() in ble_manager.cpp only runs when bleEnabled==true, so we guard here.
+  if (!s_nimble_initialized) {
+    NimBLEDevice::init(BLE_ADV_NAME);
+    s_nimble_initialized = true;
+  }
+
   int durationMs = (int)luaL_optinteger(L, 1, 1000);
   durationMs = constrain(durationMs, 100, 5000);
 
@@ -1160,7 +1169,7 @@ static int ble_scan(lua_State* L) {
   scan->setActiveScan(true);
   scan->setInterval(97);
   scan->setWindow(37);
-  NimBLEScanResults results = scan->start(durationMs / 1000, false);
+  NimBLEScanResults results = scan->start((durationMs + 999) / 1000, false);
 
   lua_newtable(L);
   for (int i = 0; i < results.getCount(); i++) {
