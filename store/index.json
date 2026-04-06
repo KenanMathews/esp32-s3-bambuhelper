@@ -1,7 +1,18 @@
 {
   "version": 1,
-  "updated": "2026-04-01",
+  "updated": "2026-04-06",
   "apps": [
+    {
+      "id": "ble-presence",
+      "name": "BLE Presence Guard",
+      "description": "Watches for your phone via BLE while printing. Alerts if you wander too far and leave the print unattended.",
+      "author": "BambuHelper",
+      "category": "tool",
+      "version": "1.0",
+      "sdk_min": 2,
+      "color": 31,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/ble-presence.lua"
+    },
     {
       "id": "crosshair",
       "name": "Crosshair",
@@ -12,6 +23,17 @@
       "sdk_min": 1,
       "color": 2016,
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/crosshair.lua"
+    },
+    {
+      "id": "layer-photo-trigger",
+      "name": "Layer Photo Trigger",
+      "description": "Shows current layer; flashes when layer changes (syncs with the Expo camera app).",
+      "author": "BambuHelper",
+      "category": "monitor",
+      "version": "1.0",
+      "sdk_min": 1,
+      "color": 63519,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/layer-photo-trigger.lua"
     },
     {
       "id": "layer-timeline",
@@ -45,6 +67,17 @@
       "sdk_min": 1,
       "color": 552,
       "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/print-report.lua"
+    },
+    {
+      "id": "tilt-gallery",
+      "name": "Tilt Gallery",
+      "description": "Swipe through 5 print stat cards by tilting the device left/right. Tap to go back to overview.",
+      "author": "BambuHelper",
+      "category": "monitor",
+      "version": "1.0",
+      "sdk_min": 2,
+      "color": 13535,
+      "script_url": "https://raw.githubusercontent.com/KenanMathews/esp32-s3-bambuhelper/main/store/apps/tilt-gallery.lua"
     }
   ]
 }
